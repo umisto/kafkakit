@@ -206,7 +206,7 @@ func (b Box) MarkInboxEventsAsFailed(
 	return events, nil
 }
 
-func (b Box) MarInboxEventsAsPending(
+func (b Box) MarkInboxEventsAsPending(
 	ctx context.Context,
 	ids []uuid.UUID,
 	delay time.Duration,
