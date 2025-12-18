@@ -68,7 +68,7 @@ func (e OutboxEvent) IsNil() bool {
 	return e.ID == uuid.Nil
 }
 
-func (b *Box) CreateOutboxEvent(
+func (b Box) CreateOutboxEvent(
 	ctx context.Context,
 	status string,
 	message kafka.Message,
@@ -138,7 +138,7 @@ func (b *Box) CreateOutboxEvent(
 	return pgdbOutboxEvent(res), nil
 }
 
-func (b *Box) GetOutboxEventByID(ctx context.Context, id uuid.UUID) (OutboxEvent, error) {
+func (b Box) GetOutboxEventByID(ctx context.Context, id uuid.UUID) (OutboxEvent, error) {
 	res, err := b.queries.GetOutboxEventByID(ctx, id)
 	if err != nil {
 		return OutboxEvent{}, fmt.Errorf("get outbox event by id: %w", err)
@@ -147,7 +147,7 @@ func (b *Box) GetOutboxEventByID(ctx context.Context, id uuid.UUID) (OutboxEvent
 	return pgdbOutboxEvent(res), nil
 }
 
-func (b *Box) GetPendingOutboxEvents(ctx context.Context, limit int32) ([]OutboxEvent, error) {
+func (b Box) GetPendingOutboxEvents(ctx context.Context, limit int32) ([]OutboxEvent, error) {
 	res, err := b.queries.GetPendingOutboxEvents(ctx, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get pending outbox events: %w", err)
@@ -161,7 +161,7 @@ func (b *Box) GetPendingOutboxEvents(ctx context.Context, limit int32) ([]Outbox
 	return events, nil
 }
 
-func (b *Box) MarkOutboxEventsSent(ctx context.Context, ids []uuid.UUID) ([]OutboxEvent, error) {
+func (b Box) MarkOutboxEventsSent(ctx context.Context, ids []uuid.UUID) ([]OutboxEvent, error) {
 	res, err := b.queries.MarkOutboxEventsAsSent(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("mark outbox events as sent: %w", err)
@@ -175,7 +175,7 @@ func (b *Box) MarkOutboxEventsSent(ctx context.Context, ids []uuid.UUID) ([]Outb
 	return events, nil
 }
 
-func (b *Box) MarkOutboxEventsAsFailed(ctx context.Context, ids []uuid.UUID) ([]OutboxEvent, error) {
+func (b Box) MarkOutboxEventsAsFailed(ctx context.Context, ids []uuid.UUID) ([]OutboxEvent, error) {
 	res, err := b.queries.MarkOutboxEventsAsFailed(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("mark outbox events as failed: %w", err)
@@ -189,7 +189,7 @@ func (b *Box) MarkOutboxEventsAsFailed(ctx context.Context, ids []uuid.UUID) ([]
 	return events, nil
 }
 
-func (b *Box) DelayOutboxEvents(ctx context.Context, ids []uuid.UUID, delay time.Duration) ([]OutboxEvent, error) {
+func (b Box) DelayOutboxEvents(ctx context.Context, ids []uuid.UUID, delay time.Duration) ([]OutboxEvent, error) {
 	res, err := b.queries.DelayOutboxEventsRetry(ctx, pgdb.DelayOutboxEventsRetryParams{
 		Ids:         ids,
 		NextRetryAt: time.Now().UTC().Add(delay),

@@ -68,7 +68,7 @@ func (e InboxEvent) IsNil() bool {
 	return e.ID == uuid.Nil
 }
 
-func (b *Box) CreateInboxEvent(
+func (b Box) CreateInboxEvent(
 	ctx context.Context,
 	status string,
 	message kafka.Message,
@@ -139,7 +139,7 @@ func (b *Box) CreateInboxEvent(
 	return pgdbInboxEvent(res), nil
 }
 
-func (b *Box) GetInboxEventByID(
+func (b Box) GetInboxEventByID(
 	ctx context.Context,
 	id uuid.UUID,
 ) (InboxEvent, error) {
@@ -154,7 +154,7 @@ func (b *Box) GetInboxEventByID(
 	return pgdbInboxEvent(res), nil
 }
 
-func (b *Box) MarkInboxEventsAsProcessed(
+func (b Box) MarkInboxEventsAsProcessed(
 	ctx context.Context,
 	ids []uuid.UUID,
 ) ([]InboxEvent, error) {
@@ -171,7 +171,7 @@ func (b *Box) MarkInboxEventsAsProcessed(
 	return events, nil
 }
 
-func (b *Box) MarkInboxEventsAsFailed(
+func (b Box) MarkInboxEventsAsFailed(
 	ctx context.Context,
 	ids []uuid.UUID,
 ) ([]InboxEvent, error) {
@@ -188,7 +188,7 @@ func (b *Box) MarkInboxEventsAsFailed(
 	return events, nil
 }
 
-func (b *Box) DelayInboxEvents(
+func (b Box) DelayInboxEvents(
 	ctx context.Context,
 	ids []uuid.UUID,
 	delay time.Duration,
