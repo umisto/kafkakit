@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/umisto/kafkakit/box/pgdb"
-	"github.com/umisto/pgx"
+	"github.com/netbill/kafkakit/box/pgdb"
+	"github.com/netbill/pgx"
 )
 
 type Box struct {
