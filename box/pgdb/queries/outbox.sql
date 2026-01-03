@@ -24,9 +24,7 @@ FROM outbox_events
 WHERE id = $1;
 
 -- name: GetPendingOutboxEvents :many
-UPDATE outbox_events
-SET status = 'processing'
-WHERE id IN (
+WITH picked AS (
     SELECT id
     FROM outbox_events
     WHERE status = 'pending'
@@ -34,8 +32,18 @@ WHERE id IN (
     ORDER BY seq ASC
     LIMIT $1
     FOR UPDATE SKIP LOCKED
+),
+updated AS (
+    UPDATE outbox_events o
+    SET status = 'processing'
+    FROM picked p
+    WHERE o.id = p.id
+    RETURNING o.*
 )
-RETURNING *;
+SELECT *
+FROM updated
+ORDER BY seq ASC;
+
 
 -- name: MarkOutboxEventsAsSent :many
 UPDATE outbox_events

@@ -24,9 +24,7 @@ FROM inbox_events
 WHERE id = $1;
 
 -- name: GetPendingInboxEvents :many
-UPDATE inbox_events
-SET status = 'processing'
-WHERE id IN (
+WITH picked AS (
     SELECT id
     FROM inbox_events
     WHERE status = 'pending'
@@ -34,8 +32,18 @@ WHERE id IN (
     ORDER BY seq ASC
     LIMIT $1
     FOR UPDATE SKIP LOCKED
+),
+updated AS (
+    UPDATE inbox_events i
+    SET status = 'processing'
+    FROM picked p
+    WHERE i.id = p.id
+    RETURNING i.*
 )
-RETURNING *;
+SELECT *
+FROM updated
+ORDER BY seq ASC;
+
 
 -- name: MarkInboxEventsAsProcessed :many
 UPDATE inbox_events

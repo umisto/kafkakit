@@ -111,9 +111,7 @@ func (q *Queries) GetInboxEventByID(ctx context.Context, id uuid.UUID) (InboxEve
 }
 
 const getPendingInboxEvents = `-- name: GetPendingInboxEvents :many
-UPDATE inbox_events
-SET status = 'processing'
-WHERE id IN (
+WITH picked AS (
     SELECT id
     FROM inbox_events
     WHERE status = 'pending'
@@ -121,19 +119,44 @@ WHERE id IN (
     ORDER BY seq ASC
     LIMIT $1
     FOR UPDATE SKIP LOCKED
+),
+updated AS (
+    UPDATE inbox_events i
+    SET status = 'processing'
+    FROM picked p
+    WHERE i.id = p.id
+    RETURNING i.id, i.seq, i.topic, i.key, i.type, i.version, i.producer, i.payload, i.status, i.attempts, i.created_at, i.next_retry_at, i.processed_at
 )
-RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, processed_at
+SELECT id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, processed_at
+FROM updated
+ORDER BY seq ASC
 `
 
-func (q *Queries) GetPendingInboxEvents(ctx context.Context, limit int32) ([]InboxEvent, error) {
+type GetPendingInboxEventsRow struct {
+	ID          uuid.UUID
+	Seq         int64
+	Topic       string
+	Key         string
+	Type        string
+	Version     int32
+	Producer    string
+	Payload     json.RawMessage
+	Status      InboxEventStatus
+	Attempts    int32
+	CreatedAt   time.Time
+	NextRetryAt sql.NullTime
+	ProcessedAt sql.NullTime
+}
+
+func (q *Queries) GetPendingInboxEvents(ctx context.Context, limit int32) ([]GetPendingInboxEventsRow, error) {
 	rows, err := q.db.QueryContext(ctx, getPendingInboxEvents, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []InboxEvent
+	var items []GetPendingInboxEventsRow
 	for rows.Next() {
-		var i InboxEvent
+		var i GetPendingInboxEventsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Seq,

@@ -111,9 +111,7 @@ func (q *Queries) GetOutboxEventByID(ctx context.Context, id uuid.UUID) (OutboxE
 }
 
 const getPendingOutboxEvents = `-- name: GetPendingOutboxEvents :many
-UPDATE outbox_events
-SET status = 'processing'
-WHERE id IN (
+WITH picked AS (
     SELECT id
     FROM outbox_events
     WHERE status = 'pending'
@@ -121,19 +119,44 @@ WHERE id IN (
     ORDER BY seq ASC
     LIMIT $1
     FOR UPDATE SKIP LOCKED
+),
+updated AS (
+    UPDATE outbox_events o
+    SET status = 'processing'
+    FROM picked p
+    WHERE o.id = p.id
+    RETURNING o.id, o.seq, o.topic, o.key, o.type, o.version, o.producer, o.payload, o.status, o.attempts, o.created_at, o.next_retry_at, o.sent_at
 )
-RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, sent_at
+SELECT id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, sent_at
+FROM updated
+ORDER BY seq ASC
 `
 
-func (q *Queries) GetPendingOutboxEvents(ctx context.Context, limit int32) ([]OutboxEvent, error) {
+type GetPendingOutboxEventsRow struct {
+	ID          uuid.UUID
+	Seq         int64
+	Topic       string
+	Key         string
+	Type        string
+	Version     int32
+	Producer    string
+	Payload     json.RawMessage
+	Status      OutboxEventStatus
+	Attempts    int32
+	CreatedAt   time.Time
+	NextRetryAt sql.NullTime
+	SentAt      sql.NullTime
+}
+
+func (q *Queries) GetPendingOutboxEvents(ctx context.Context, limit int32) ([]GetPendingOutboxEventsRow, error) {
 	rows, err := q.db.QueryContext(ctx, getPendingOutboxEvents, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OutboxEvent
+	var items []GetPendingOutboxEventsRow
 	for rows.Next() {
-		var i OutboxEvent
+		var i GetPendingOutboxEventsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Seq,
