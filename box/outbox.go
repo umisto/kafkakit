@@ -150,7 +150,29 @@ func (b Box) GetPendingOutboxEvents(ctx context.Context, limit int32) ([]OutboxE
 
 	events := make([]OutboxEvent, 0, len(res))
 	for _, e := range res {
-		events = append(events, pgdbOutboxEvent(e))
+		ele := OutboxEvent{
+			ID:        e.ID,
+			Seq:       e.Seq,
+			Topic:     e.Topic,
+			Key:       e.Key,
+			Type:      e.Type,
+			Version:   e.Version,
+			Producer:  e.Producer,
+			Payload:   e.Payload,
+			Status:    string(e.Status),
+			Attempts:  e.Attempts,
+			CreatedAt: e.CreatedAt,
+		}
+
+		if e.NextRetryAt.Valid {
+			ele.NextRetryAt = &e.NextRetryAt.Time
+		}
+
+		if e.SentAt.Valid {
+			ele.SentAt = &e.SentAt.Time
+		}
+
+		events = append(events, ele)
 	}
 
 	return events, nil

@@ -160,7 +160,28 @@ func (b Box) GetPendingInboxEvents(
 
 	events := make([]InboxEvent, 0, len(res))
 	for _, e := range res {
-		events = append(events, pgdbInboxEvent(e))
+		ele := InboxEvent{
+			ID:        e.ID,
+			Seq:       e.Seq,
+			Topic:     e.Topic,
+			Key:       e.Key,
+			Type:      e.Type,
+			Version:   e.Version,
+			Producer:  e.Producer,
+			Payload:   e.Payload,
+			Status:    string(e.Status),
+			Attempts:  e.Attempts,
+			CreatedAt: e.CreatedAt,
+		}
+
+		if e.NextRetryAt.Valid {
+			ele.NextRetryAt = &e.NextRetryAt.Time
+		}
+		if e.ProcessedAt.Valid {
+			ele.ProcessedAt = &e.ProcessedAt.Time
+		}
+
+		events = append(events, ele)
 	}
 
 	return events, nil
