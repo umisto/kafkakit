@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/netbill/kafkakit/box/pgdb"
+	"github.com/netbill/evebox/box/pgdb"
 	"github.com/netbill/pgx"
 )
 

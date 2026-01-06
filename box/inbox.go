@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/netbill/kafkakit/box/pgdb"
-	"github.com/netbill/kafkakit/header"
+	"github.com/netbill/evebox/box/pgdb"
+	"github.com/netbill/evebox/header"
 	"github.com/segmentio/kafka-go"
 )
 
