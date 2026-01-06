@@ -14,11 +14,30 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
+type OutboxStatus string
+
+func (e OutboxStatus) String() string {
+	return string(e)
+}
+
+func (e OutboxStatus) IsValid() bool {
+	switch e {
+	case OutboxStatusPending, OutboxStatusProcessing, OutboxStatusSent, OutboxStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func (e OutboxStatus) pgdb() pgdb.OutboxEventStatus {
+	return pgdb.OutboxEventStatus(e.String())
+}
+
 const (
-	OutboxStatusPending    = "pending"
-	OutboxStatusProcessing = "processing"
-	OutboxStatusSent       = "sent"
-	OutboxStatusFailed     = "failed"
+	OutboxStatusPending    OutboxStatus = "pending"
+	OutboxStatusProcessing OutboxStatus = "processing"
+	OutboxStatusSent       OutboxStatus = "sent"
+	OutboxStatusFailed     OutboxStatus = "failed"
 )
 
 type OutboxEvent struct {
@@ -30,7 +49,7 @@ type OutboxEvent struct {
 	Version     int32
 	Producer    string
 	Payload     json.RawMessage
-	Status      string
+	Status      OutboxStatus
 	Attempts    int32
 	CreatedAt   time.Time
 	NextRetryAt *time.Time
@@ -121,7 +140,7 @@ func (b Box) CreateOutboxEvent(
 		Version:     eventVersion,
 		Producer:    string(producer),
 		Payload:     value,
-		Status:      OutboxStatusPending,
+		Status:      OutboxStatusPending.pgdb(),
 		NextRetryAt: sql.NullTime{Valid: true, Time: time.Now().UTC()},
 	}
 
@@ -159,7 +178,7 @@ func (b Box) GetPendingOutboxEvents(ctx context.Context, limit int32) ([]OutboxE
 			Version:   e.Version,
 			Producer:  e.Producer,
 			Payload:   e.Payload,
-			Status:    string(e.Status),
+			Status:    OutboxStatus(e.Status),
 			Attempts:  e.Attempts,
 			CreatedAt: e.CreatedAt,
 		}
@@ -233,7 +252,7 @@ func pgdbOutboxEvent(e pgdb.OutboxEvent) OutboxEvent {
 		Version:   e.Version,
 		Producer:  e.Producer,
 		Payload:   e.Payload,
-		Status:    string(e.Status),
+		Status:    OutboxStatus(e.Status),
 		Attempts:  e.Attempts,
 		CreatedAt: e.CreatedAt,
 	}

@@ -61,7 +61,7 @@ SET
 WHERE id = ANY(sqlc.arg(ids)::uuid[])
 RETURNING *;
 
--- name: MarInboxEventsAsPending :many
+-- name: MarkInboxEventsAsPending :many
 UPDATE inbox_events
 SET
     status = 'pending',

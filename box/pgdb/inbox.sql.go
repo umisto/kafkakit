@@ -185,23 +185,17 @@ func (q *Queries) GetPendingInboxEvents(ctx context.Context, limit int32) ([]Get
 	return items, nil
 }
 
-const marInboxEventsAsPending = `-- name: MarInboxEventsAsPending :many
+const markInboxEventsAsFailed = `-- name: MarkInboxEventsAsFailed :many
 UPDATE inbox_events
 SET
-    status = 'pending',
-    attempts = attempts + 1,
-    next_retry_at = $1::timestamptz
-WHERE id = ANY($2::uuid[])
+    status = 'failed',
+    next_retry_at = NULL
+WHERE id = ANY($1::uuid[])
 RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, processed_at
 `
 
-type MarInboxEventsAsPendingParams struct {
-	NextRetryAt time.Time
-	Ids         []uuid.UUID
-}
-
-func (q *Queries) MarInboxEventsAsPending(ctx context.Context, arg MarInboxEventsAsPendingParams) ([]InboxEvent, error) {
-	rows, err := q.db.QueryContext(ctx, marInboxEventsAsPending, arg.NextRetryAt, pq.Array(arg.Ids))
+func (q *Queries) MarkInboxEventsAsFailed(ctx context.Context, ids []uuid.UUID) ([]InboxEvent, error) {
+	rows, err := q.db.QueryContext(ctx, markInboxEventsAsFailed, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}
@@ -237,17 +231,23 @@ func (q *Queries) MarInboxEventsAsPending(ctx context.Context, arg MarInboxEvent
 	return items, nil
 }
 
-const markInboxEventsAsFailed = `-- name: MarkInboxEventsAsFailed :many
+const markInboxEventsAsPending = `-- name: MarkInboxEventsAsPending :many
 UPDATE inbox_events
 SET
-    status = 'failed',
-    next_retry_at = NULL
-WHERE id = ANY($1::uuid[])
+    status = 'pending',
+    attempts = attempts + 1,
+    next_retry_at = $1::timestamptz
+WHERE id = ANY($2::uuid[])
 RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, processed_at
 `
 
-func (q *Queries) MarkInboxEventsAsFailed(ctx context.Context, ids []uuid.UUID) ([]InboxEvent, error) {
-	rows, err := q.db.QueryContext(ctx, markInboxEventsAsFailed, pq.Array(ids))
+type MarkInboxEventsAsPendingParams struct {
+	NextRetryAt time.Time
+	Ids         []uuid.UUID
+}
+
+func (q *Queries) MarkInboxEventsAsPending(ctx context.Context, arg MarkInboxEventsAsPendingParams) ([]InboxEvent, error) {
+	rows, err := q.db.QueryContext(ctx, markInboxEventsAsPending, arg.NextRetryAt, pq.Array(arg.Ids))
 	if err != nil {
 		return nil, err
 	}

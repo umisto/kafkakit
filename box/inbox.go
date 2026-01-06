@@ -12,14 +12,34 @@ import (
 	"github.com/google/uuid"
 	"github.com/netbill/evebox/box/pgdb"
 	"github.com/netbill/evebox/header"
+	"github.com/netbill/logium"
 	"github.com/segmentio/kafka-go"
 )
 
+type InboxStatus string
+
+func (e InboxStatus) String() string {
+	return string(e)
+}
+
+func (e InboxStatus) IsValid() bool {
+	switch e {
+	case InboxStatusPending, InboxStatusProcessed, InboxStatusProcessing, InboxStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func (e InboxStatus) pgdb() pgdb.InboxEventStatus {
+	return pgdb.InboxEventStatus(e.String())
+}
+
 const (
-	InboxStatusPending    = "pending"
-	InboxStatusProcessed  = "processed"
-	InboxStatusProcessing = "processing"
-	InboxStatusFailed     = "failed"
+	InboxStatusPending    InboxStatus = "pending"
+	InboxStatusProcessed  InboxStatus = "processed"
+	InboxStatusProcessing InboxStatus = "processing"
+	InboxStatusFailed     InboxStatus = "failed"
 )
 
 type InboxEvent struct {
@@ -31,7 +51,7 @@ type InboxEvent struct {
 	Version     int32
 	Producer    string
 	Payload     json.RawMessage
-	Status      string
+	Status      InboxStatus
 	Attempts    int32
 	CreatedAt   time.Time
 	NextRetryAt *time.Time
@@ -122,7 +142,7 @@ func (b Box) CreateInboxEvent(
 		Version:     eventVersion,
 		Producer:    string(producer),
 		Payload:     value,
-		Status:      InboxStatusPending,
+		Status:      InboxStatusPending.pgdb(),
 		NextRetryAt: sql.NullTime{Time: time.Now().UTC(), Valid: true},
 	}
 
@@ -169,7 +189,7 @@ func (b Box) GetPendingInboxEvents(
 			Version:   e.Version,
 			Producer:  e.Producer,
 			Payload:   e.Payload,
-			Status:    string(e.Status),
+			Status:    InboxStatus(e.Status),
 			Attempts:  e.Attempts,
 			CreatedAt: e.CreatedAt,
 		}
@@ -226,7 +246,7 @@ func (b Box) MarkInboxEventsAsPending(
 	ids []uuid.UUID,
 	delay time.Duration,
 ) ([]InboxEvent, error) {
-	res, err := b.queries(ctx).MarInboxEventsAsPending(ctx, pgdb.MarInboxEventsAsPendingParams{
+	res, err := b.queries(ctx).MarkInboxEventsAsPending(ctx, pgdb.MarkInboxEventsAsPendingParams{
 		Ids:         ids,
 		NextRetryAt: time.Now().UTC().Add(delay),
 	})
@@ -245,7 +265,7 @@ func (b Box) MarkInboxEventsAsPending(
 func (b Box) UpdateInboxEventStatus(
 	ctx context.Context,
 	id uuid.UUID,
-	status string,
+	status InboxStatus,
 ) (InboxEvent, error) {
 	res, err := b.queries(ctx).UpdateInboxEventStatus(ctx, pgdb.UpdateInboxEventStatusParams{
 		ID:     id,
@@ -258,6 +278,30 @@ func (b Box) UpdateInboxEventStatus(
 	return pgdbInboxEvent(res), nil
 }
 
+type InboxHandler func(ctx context.Context, event InboxEvent) InboxStatus
+
+func (b Box) WriteAndHandle(
+	ctx context.Context,
+	log logium.Logger,
+	message kafka.Message,
+	handler InboxHandler,
+) error {
+	return b.Transaction(ctx, func(ctx context.Context) error {
+		eventInBox, err := b.CreateInboxEvent(ctx, message)
+		if err != nil {
+			log.Errorf("failed to upsert inbox event for account %s: %v", string(message.Key), err)
+			return err
+		}
+
+		if _, err = b.UpdateInboxEventStatus(ctx, eventInBox.ID, handler(ctx, eventInBox)); err != nil {
+			log.Errorf("failed to update inbox event status for key %s, id: %s, error: %v", eventInBox.Key, eventInBox.ID, err)
+			return err
+		}
+
+		return nil
+	})
+}
+
 func pgdbInboxEvent(e pgdb.InboxEvent) InboxEvent {
 	res := InboxEvent{
 		ID:        e.ID,
@@ -268,7 +312,7 @@ func pgdbInboxEvent(e pgdb.InboxEvent) InboxEvent {
 		Version:   e.Version,
 		Producer:  e.Producer,
 		Payload:   e.Payload,
-		Status:    string(e.Status),
+		Status:    InboxStatus(e.Status),
 		Attempts:  e.Attempts,
 		CreatedAt: e.CreatedAt,
 	}
