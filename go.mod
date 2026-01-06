@@ -1,4 +1,4 @@
-module github.com/netbill/kafkakit
+module github.com/netbill/evebox
 
 go 1.25.4
 
