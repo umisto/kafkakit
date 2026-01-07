@@ -7,7 +7,6 @@ package pgdb
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"time"
 
@@ -17,52 +16,32 @@ import (
 
 const createOutboxEvent = `-- name: CreateOutboxEvent :one
 INSERT INTO outbox_events (
-    id,
-    topic,
-    type,
-    version,
-    key,
-    producer,
-    payload,
-    status,
-    attempts,
-    next_retry_at,
-    sent_at
+    id, topic, key, type, version, producer, payload
 ) VALUES (
-    $1, $2, $3, $4, $5, $6,
-    $7, $8, $9,  $10, $11
+    $1, $2, $3, $4, $5, $6, $7
 )
-ON CONFLICT (id) DO NOTHING
-RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, sent_at
+RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, next_retry_at, sent_at
 `
 
 type CreateOutboxEventParams struct {
-	ID          uuid.UUID
-	Topic       string
-	Type        string
-	Version     int32
-	Key         string
-	Producer    string
-	Payload     json.RawMessage
-	Status      OutboxEventStatus
-	Attempts    int32
-	NextRetryAt sql.NullTime
-	SentAt      sql.NullTime
+	ID       uuid.UUID
+	Topic    string
+	Key      string
+	Type     string
+	Version  int32
+	Producer string
+	Payload  json.RawMessage
 }
 
 func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) (OutboxEvent, error) {
 	row := q.db.QueryRowContext(ctx, createOutboxEvent,
 		arg.ID,
 		arg.Topic,
+		arg.Key,
 		arg.Type,
 		arg.Version,
-		arg.Key,
 		arg.Producer,
 		arg.Payload,
-		arg.Status,
-		arg.Attempts,
-		arg.NextRetryAt,
-		arg.SentAt,
 	)
 	var i OutboxEvent
 	err := row.Scan(
@@ -76,6 +55,7 @@ func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventPa
 		&i.Payload,
 		&i.Status,
 		&i.Attempts,
+		&i.LastAttemptAt,
 		&i.CreatedAt,
 		&i.NextRetryAt,
 		&i.SentAt,
@@ -84,7 +64,7 @@ func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventPa
 }
 
 const getOutboxEventByID = `-- name: GetOutboxEventByID :one
-SELECT id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, sent_at
+SELECT id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, next_retry_at, sent_at
 FROM outbox_events
 WHERE id = $1
 `
@@ -103,6 +83,7 @@ func (q *Queries) GetOutboxEventByID(ctx context.Context, id uuid.UUID) (OutboxE
 		&i.Payload,
 		&i.Status,
 		&i.Attempts,
+		&i.LastAttemptAt,
 		&i.CreatedAt,
 		&i.NextRetryAt,
 		&i.SentAt,
@@ -110,53 +91,31 @@ func (q *Queries) GetOutboxEventByID(ctx context.Context, id uuid.UUID) (OutboxE
 	return i, err
 }
 
-const getPendingOutboxEvents = `-- name: GetPendingOutboxEvents :many
-WITH picked AS (
-    SELECT id
-    FROM outbox_events
-    WHERE status = 'pending'
-      AND (next_retry_at IS NULL OR next_retry_at <= now() AT TIME ZONE 'UTC')
-    ORDER BY seq ASC
-    LIMIT $1
-    FOR UPDATE SKIP LOCKED
-),
-updated AS (
-    UPDATE outbox_events o
-    SET status = 'processing'
-    FROM picked p
-    WHERE o.id = p.id
-    RETURNING o.id, o.seq, o.topic, o.key, o.type, o.version, o.producer, o.payload, o.status, o.attempts, o.created_at, o.next_retry_at, o.sent_at
-)
-SELECT id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, sent_at
-FROM updated
+const getPendingOutboxEventsByKey = `-- name: GetPendingOutboxEventsByKey :many
+SELECT id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, next_retry_at, sent_at
+FROM outbox_events
+WHERE status = 'pending'
+    AND key = $2::text
+    AND next_retry_at <= (now() AT TIME ZONE 'UTC')
 ORDER BY seq ASC
+LIMIT $1
+FOR UPDATE SKIP LOCKED
 `
 
-type GetPendingOutboxEventsRow struct {
-	ID          uuid.UUID
-	Seq         int64
-	Topic       string
-	Key         string
-	Type        string
-	Version     int32
-	Producer    string
-	Payload     json.RawMessage
-	Status      OutboxEventStatus
-	Attempts    int32
-	CreatedAt   time.Time
-	NextRetryAt sql.NullTime
-	SentAt      sql.NullTime
+type GetPendingOutboxEventsByKeyParams struct {
+	Limit int32
+	Key   string
 }
 
-func (q *Queries) GetPendingOutboxEvents(ctx context.Context, limit int32) ([]GetPendingOutboxEventsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getPendingOutboxEvents, limit)
+func (q *Queries) GetPendingOutboxEventsByKey(ctx context.Context, arg GetPendingOutboxEventsByKeyParams) ([]OutboxEvent, error) {
+	rows, err := q.db.QueryContext(ctx, getPendingOutboxEventsByKey, arg.Limit, arg.Key)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetPendingOutboxEventsRow
+	var items []OutboxEvent
 	for rows.Next() {
-		var i GetPendingOutboxEventsRow
+		var i OutboxEvent
 		if err := rows.Scan(
 			&i.ID,
 			&i.Seq,
@@ -168,6 +127,7 @@ func (q *Queries) GetPendingOutboxEvents(ctx context.Context, limit int32) ([]Ge
 			&i.Payload,
 			&i.Status,
 			&i.Attempts,
+			&i.LastAttemptAt,
 			&i.CreatedAt,
 			&i.NextRetryAt,
 			&i.SentAt,
@@ -189,9 +149,10 @@ const markOutboxEventsAsFailed = `-- name: MarkOutboxEventsAsFailed :many
 UPDATE outbox_events
 SET
     status = 'failed',
-    next_retry_at = NULL
+    attempts = attempts + 1,
+    last_attempt_at = (now() AT TIME ZONE 'UTC')
 WHERE id = ANY($1::uuid[])
-RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, sent_at
+RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, next_retry_at, sent_at
 `
 
 func (q *Queries) MarkOutboxEventsAsFailed(ctx context.Context, ids []uuid.UUID) ([]OutboxEvent, error) {
@@ -214,6 +175,7 @@ func (q *Queries) MarkOutboxEventsAsFailed(ctx context.Context, ids []uuid.UUID)
 			&i.Payload,
 			&i.Status,
 			&i.Attempts,
+			&i.LastAttemptAt,
 			&i.CreatedAt,
 			&i.NextRetryAt,
 			&i.SentAt,
@@ -235,10 +197,9 @@ const markOutboxEventsAsPending = `-- name: MarkOutboxEventsAsPending :many
 UPDATE outbox_events
 SET
     status = 'pending',
-    attempts = attempts + 1,
     next_retry_at = $1::timestamptz
 WHERE id = ANY($2::uuid[])
-RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, sent_at
+RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, next_retry_at, sent_at
 `
 
 type MarkOutboxEventsAsPendingParams struct {
@@ -266,6 +227,7 @@ func (q *Queries) MarkOutboxEventsAsPending(ctx context.Context, arg MarkOutboxE
 			&i.Payload,
 			&i.Status,
 			&i.Attempts,
+			&i.LastAttemptAt,
 			&i.CreatedAt,
 			&i.NextRetryAt,
 			&i.SentAt,
@@ -287,9 +249,11 @@ const markOutboxEventsAsSent = `-- name: MarkOutboxEventsAsSent :many
 UPDATE outbox_events
 SET
     status = 'sent',
-    sent_at = now() AT TIME ZONE 'UTC'
+    attempts = attempts + 1,
+    last_attempt_at = (now() AT TIME ZONE 'UTC'),
+    sent_at = (now() AT TIME ZONE 'UTC')
 WHERE id = ANY($1::uuid[])
-RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, sent_at
+RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, next_retry_at, sent_at
 `
 
 func (q *Queries) MarkOutboxEventsAsSent(ctx context.Context, ids []uuid.UUID) ([]OutboxEvent, error) {
@@ -312,6 +276,7 @@ func (q *Queries) MarkOutboxEventsAsSent(ctx context.Context, ids []uuid.UUID) (
 			&i.Payload,
 			&i.Status,
 			&i.Attempts,
+			&i.LastAttemptAt,
 			&i.CreatedAt,
 			&i.NextRetryAt,
 			&i.SentAt,
@@ -327,4 +292,22 @@ func (q *Queries) MarkOutboxEventsAsSent(ctx context.Context, ids []uuid.UUID) (
 		return nil, err
 	}
 	return items, nil
+}
+
+const pickPendingOutboxKey = `-- name: PickPendingOutboxKey :one
+SELECT e.key
+FROM outbox_events e
+    LEFT JOIN outbox_key_state ks ON ks.key = e.key
+WHERE e.status = 'pending'
+    AND e.next_retry_at <= (now() AT TIME ZONE 'UTC')
+    AND (ks.blocked_until IS NULL OR ks.blocked_until <= (now() AT TIME ZONE 'UTC'))
+ORDER BY e.seq ASC
+LIMIT 1
+`
+
+func (q *Queries) PickPendingOutboxKey(ctx context.Context) (string, error) {
+	row := q.db.QueryRowContext(ctx, pickPendingOutboxKey)
+	var key string
+	err := row.Scan(&key)
+	return key, err
 }

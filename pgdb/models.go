@@ -17,10 +17,9 @@ import (
 type InboxEventStatus string
 
 const (
-	InboxEventStatusPending    InboxEventStatus = "pending"
-	InboxEventStatusProcessing InboxEventStatus = "processing"
-	InboxEventStatusProcessed  InboxEventStatus = "processed"
-	InboxEventStatusFailed     InboxEventStatus = "failed"
+	InboxEventStatusPending   InboxEventStatus = "pending"
+	InboxEventStatusProcessed InboxEventStatus = "processed"
+	InboxEventStatusFailed    InboxEventStatus = "failed"
 )
 
 func (e *InboxEventStatus) Scan(src interface{}) error {
@@ -61,10 +60,9 @@ func (ns NullInboxEventStatus) Value() (driver.Value, error) {
 type OutboxEventStatus string
 
 const (
-	OutboxEventStatusPending    OutboxEventStatus = "pending"
-	OutboxEventStatusProcessing OutboxEventStatus = "processing"
-	OutboxEventStatusSent       OutboxEventStatus = "sent"
-	OutboxEventStatusFailed     OutboxEventStatus = "failed"
+	OutboxEventStatusPending OutboxEventStatus = "pending"
+	OutboxEventStatusSent    OutboxEventStatus = "sent"
+	OutboxEventStatusFailed  OutboxEventStatus = "failed"
 )
 
 func (e *OutboxEventStatus) Scan(src interface{}) error {
@@ -103,33 +101,63 @@ func (ns NullOutboxEventStatus) Value() (driver.Value, error) {
 }
 
 type InboxEvent struct {
-	ID          uuid.UUID
-	Seq         int64
-	Topic       string
-	Key         string
-	Type        string
-	Version     int32
-	Producer    string
-	Payload     json.RawMessage
-	Status      InboxEventStatus
-	Attempts    int32
-	CreatedAt   time.Time
-	NextRetryAt sql.NullTime
-	ProcessedAt sql.NullTime
+	ID             uuid.UUID
+	Seq            int64
+	Topic          string
+	Key            string
+	Type           string
+	Version        int32
+	Producer       string
+	Payload  json.RawMessage
+	Status   InboxEventStatus
+	Attempts int32
+	LastAttemptAt  time.Time
+	CreatedAt      time.Time
+	KafkaPartition sql.NullInt32
+	KafkaOffset    sql.NullInt64
+	NextRetryAt    time.Time
+	ProcessedAt    sql.NullTime
+}
+
+type InboxKeyLock struct {
+	Key      string
+	Owner    string
+	LockedAt time.Time
+	StaleAt  time.Time
+}
+
+type InboxKeyState struct {
+	Key          string
+	BlockedUntil sql.NullTime
+	UpdatedAt    time.Time
 }
 
 type OutboxEvent struct {
-	ID          uuid.UUID
-	Seq         int64
-	Topic       string
-	Key         string
-	Type        string
-	Version     int32
-	Producer    string
-	Payload     json.RawMessage
-	Status      OutboxEventStatus
-	Attempts    int32
-	CreatedAt   time.Time
-	NextRetryAt sql.NullTime
-	SentAt      sql.NullTime
+	ID            uuid.UUID
+	Seq           int64
+	Topic         string
+	Key           string
+	Type          string
+	Version       int32
+	Producer      string
+	Payload  json.RawMessage
+	Status   OutboxEventStatus
+	Attempts int32
+	LastAttemptAt sql.NullTime
+	CreatedAt     time.Time
+	NextRetryAt   time.Time
+	SentAt        sql.NullTime
+}
+
+type OutboxKeyLock struct {
+	Key      string
+	Owner    string
+	LockedAt time.Time
+	StaleAt  time.Time
+}
+
+type OutboxKeyState struct {
+	Key          string
+	BlockedUntil sql.NullTime
+	UpdatedAt    time.Time
 }

@@ -17,37 +17,28 @@ import (
 
 const createInboxEvent = `-- name: CreateInboxEvent :one
 INSERT INTO inbox_events (
-    id,
-    topic,
-    key,
-    type,
-    version,
-    producer,
-    payload,
-    status,
-    attempts,
-    next_retry_at,
-    processed_at
+    id, topic, key, type, version, producer, payload,
+    kafka_partition, kafka_offset
 ) VALUES (
-    $1, $2, $3, $4, $5, $6,
-    $7, $8, $9,  $10, $11
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9
 )
-ON CONFLICT (id) DO NOTHING
-RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, processed_at
+ON CONFLICT (topic, kafka_partition, kafka_offset)
+WHERE kafka_partition IS NOT NULL AND kafka_offset IS NOT NULL
+DO NOTHING
+RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, kafka_partition, kafka_offset, next_retry_at, processed_at
 `
 
 type CreateInboxEventParams struct {
-	ID          uuid.UUID
-	Topic       string
-	Key         string
-	Type        string
-	Version     int32
-	Producer    string
-	Payload     json.RawMessage
-	Status      InboxEventStatus
-	Attempts    int32
-	NextRetryAt sql.NullTime
-	ProcessedAt sql.NullTime
+	ID             uuid.UUID
+	Topic          string
+	Key            string
+	Type           string
+	Version        int32
+	Producer       string
+	Payload        json.RawMessage
+	KafkaPartition sql.NullInt32
+	KafkaOffset    sql.NullInt64
 }
 
 func (q *Queries) CreateInboxEvent(ctx context.Context, arg CreateInboxEventParams) (InboxEvent, error) {
@@ -59,10 +50,8 @@ func (q *Queries) CreateInboxEvent(ctx context.Context, arg CreateInboxEventPara
 		arg.Version,
 		arg.Producer,
 		arg.Payload,
-		arg.Status,
-		arg.Attempts,
-		arg.NextRetryAt,
-		arg.ProcessedAt,
+		arg.KafkaPartition,
+		arg.KafkaOffset,
 	)
 	var i InboxEvent
 	err := row.Scan(
@@ -76,7 +65,10 @@ func (q *Queries) CreateInboxEvent(ctx context.Context, arg CreateInboxEventPara
 		&i.Payload,
 		&i.Status,
 		&i.Attempts,
+		&i.LastAttemptAt,
 		&i.CreatedAt,
+		&i.KafkaPartition,
+		&i.KafkaOffset,
 		&i.NextRetryAt,
 		&i.ProcessedAt,
 	)
@@ -84,7 +76,7 @@ func (q *Queries) CreateInboxEvent(ctx context.Context, arg CreateInboxEventPara
 }
 
 const getInboxEventByID = `-- name: GetInboxEventByID :one
-SELECT id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, processed_at
+SELECT id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, kafka_partition, kafka_offset, next_retry_at, processed_at
 FROM inbox_events
 WHERE id = $1
 `
@@ -103,60 +95,41 @@ func (q *Queries) GetInboxEventByID(ctx context.Context, id uuid.UUID) (InboxEve
 		&i.Payload,
 		&i.Status,
 		&i.Attempts,
+		&i.LastAttemptAt,
 		&i.CreatedAt,
+		&i.KafkaPartition,
+		&i.KafkaOffset,
 		&i.NextRetryAt,
 		&i.ProcessedAt,
 	)
 	return i, err
 }
 
-const getPendingInboxEvents = `-- name: GetPendingInboxEvents :many
-WITH picked AS (
-    SELECT id
-    FROM inbox_events
-    WHERE status = 'pending'
-      AND (next_retry_at IS NULL OR next_retry_at <= now() AT TIME ZONE 'UTC')
-    ORDER BY seq ASC
-    LIMIT $1
-    FOR UPDATE SKIP LOCKED
-),
-updated AS (
-    UPDATE inbox_events i
-    SET status = 'processing'
-    FROM picked p
-    WHERE i.id = p.id
-    RETURNING i.id, i.seq, i.topic, i.key, i.type, i.version, i.producer, i.payload, i.status, i.attempts, i.created_at, i.next_retry_at, i.processed_at
-)
-SELECT id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, processed_at
-FROM updated
+const getPendingInboxEventsByKey = `-- name: GetPendingInboxEventsByKey :many
+SELECT id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, kafka_partition, kafka_offset, next_retry_at, processed_at
+FROM inbox_events
+WHERE status = 'pending'
+  AND key = $1
+  AND next_retry_at <= (now() AT TIME ZONE 'UTC')
 ORDER BY seq ASC
+LIMIT $2
+FOR UPDATE SKIP LOCKED
 `
 
-type GetPendingInboxEventsRow struct {
-	ID          uuid.UUID
-	Seq         int64
-	Topic       string
-	Key         string
-	Type        string
-	Version     int32
-	Producer    string
-	Payload     json.RawMessage
-	Status      InboxEventStatus
-	Attempts    int32
-	CreatedAt   time.Time
-	NextRetryAt sql.NullTime
-	ProcessedAt sql.NullTime
+type GetPendingInboxEventsByKeyParams struct {
+	Key   string
+	Limit int32
 }
 
-func (q *Queries) GetPendingInboxEvents(ctx context.Context, limit int32) ([]GetPendingInboxEventsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getPendingInboxEvents, limit)
+func (q *Queries) GetPendingInboxEventsByKey(ctx context.Context, arg GetPendingInboxEventsByKeyParams) ([]InboxEvent, error) {
+	rows, err := q.db.QueryContext(ctx, getPendingInboxEventsByKey, arg.Key, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetPendingInboxEventsRow
+	var items []InboxEvent
 	for rows.Next() {
-		var i GetPendingInboxEventsRow
+		var i InboxEvent
 		if err := rows.Scan(
 			&i.ID,
 			&i.Seq,
@@ -168,7 +141,10 @@ func (q *Queries) GetPendingInboxEvents(ctx context.Context, limit int32) ([]Get
 			&i.Payload,
 			&i.Status,
 			&i.Attempts,
+			&i.LastAttemptAt,
 			&i.CreatedAt,
+			&i.KafkaPartition,
+			&i.KafkaOffset,
 			&i.NextRetryAt,
 			&i.ProcessedAt,
 		); err != nil {
@@ -189,9 +165,10 @@ const markInboxEventsAsFailed = `-- name: MarkInboxEventsAsFailed :many
 UPDATE inbox_events
 SET
     status = 'failed',
-    next_retry_at = NULL
+    attempts = attempts + 1,
+    last_attempt_at = (now() AT TIME ZONE 'UTC')
 WHERE id = ANY($1::uuid[])
-RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, processed_at
+    RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, kafka_partition, kafka_offset, next_retry_at, processed_at
 `
 
 func (q *Queries) MarkInboxEventsAsFailed(ctx context.Context, ids []uuid.UUID) ([]InboxEvent, error) {
@@ -214,7 +191,10 @@ func (q *Queries) MarkInboxEventsAsFailed(ctx context.Context, ids []uuid.UUID) 
 			&i.Payload,
 			&i.Status,
 			&i.Attempts,
+			&i.LastAttemptAt,
 			&i.CreatedAt,
+			&i.KafkaPartition,
+			&i.KafkaOffset,
 			&i.NextRetryAt,
 			&i.ProcessedAt,
 		); err != nil {
@@ -236,9 +216,10 @@ UPDATE inbox_events
 SET
     status = 'pending',
     attempts = attempts + 1,
+    last_attempt_at = (now() AT TIME ZONE 'UTC'),
     next_retry_at = $1::timestamptz
 WHERE id = ANY($2::uuid[])
-RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, processed_at
+    RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, kafka_partition, kafka_offset, next_retry_at, processed_at
 `
 
 type MarkInboxEventsAsPendingParams struct {
@@ -266,7 +247,10 @@ func (q *Queries) MarkInboxEventsAsPending(ctx context.Context, arg MarkInboxEve
 			&i.Payload,
 			&i.Status,
 			&i.Attempts,
+			&i.LastAttemptAt,
 			&i.CreatedAt,
+			&i.KafkaPartition,
+			&i.KafkaOffset,
 			&i.NextRetryAt,
 			&i.ProcessedAt,
 		); err != nil {
@@ -287,9 +271,9 @@ const markInboxEventsAsProcessed = `-- name: MarkInboxEventsAsProcessed :many
 UPDATE inbox_events
 SET
     status = 'processed',
-    processed_at = now() AT TIME ZONE 'UTC'
+    processed_at = (now() AT TIME ZONE 'UTC')
 WHERE id = ANY($1::uuid[])
-RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, processed_at
+    RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, kafka_partition, kafka_offset, next_retry_at, processed_at
 `
 
 func (q *Queries) MarkInboxEventsAsProcessed(ctx context.Context, ids []uuid.UUID) ([]InboxEvent, error) {
@@ -312,7 +296,10 @@ func (q *Queries) MarkInboxEventsAsProcessed(ctx context.Context, ids []uuid.UUI
 			&i.Payload,
 			&i.Status,
 			&i.Attempts,
+			&i.LastAttemptAt,
 			&i.CreatedAt,
+			&i.KafkaPartition,
+			&i.KafkaOffset,
 			&i.NextRetryAt,
 			&i.ProcessedAt,
 		); err != nil {
@@ -329,35 +316,22 @@ func (q *Queries) MarkInboxEventsAsProcessed(ctx context.Context, ids []uuid.UUI
 	return items, nil
 }
 
-const updateInboxEventStatus = `-- name: UpdateInboxEventStatus :one
-UPDATE inbox_events
-SET status = $1::inbox_event_status
-WHERE id = $2::uuid
-RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, created_at, next_retry_at, processed_at
+const pickPendingInboxKey = `-- name: PickPendingInboxKey :one
+SELECT e.key
+FROM inbox_events e
+LEFT JOIN inbox_key_state ks ON ks.key = e.key
+LEFT JOIN inbox_key_locks kl ON kl.key = e.key
+WHERE e.status = 'pending'
+    AND e.next_retry_at <= (now() AT TIME ZONE 'UTC')
+    AND (ks.blocked_until IS NULL OR ks.blocked_until <= (now() AT TIME ZONE 'UTC'))
+    AND (kl.key IS NULL OR kl.stale_at <= (now() AT TIME ZONE 'UTC'))
+ORDER BY e.seq ASC
+    LIMIT 1
 `
 
-type UpdateInboxEventStatusParams struct {
-	Status InboxEventStatus
-	ID     uuid.UUID
-}
-
-func (q *Queries) UpdateInboxEventStatus(ctx context.Context, arg UpdateInboxEventStatusParams) (InboxEvent, error) {
-	row := q.db.QueryRowContext(ctx, updateInboxEventStatus, arg.Status, arg.ID)
-	var i InboxEvent
-	err := row.Scan(
-		&i.ID,
-		&i.Seq,
-		&i.Topic,
-		&i.Key,
-		&i.Type,
-		&i.Version,
-		&i.Producer,
-		&i.Payload,
-		&i.Status,
-		&i.Attempts,
-		&i.CreatedAt,
-		&i.NextRetryAt,
-		&i.ProcessedAt,
-	)
-	return i, err
+func (q *Queries) PickPendingInboxKey(ctx context.Context) (string, error) {
+	row := q.db.QueryRowContext(ctx, pickPendingInboxKey)
+	var key string
+	err := row.Scan(&key)
+	return key, err
 }

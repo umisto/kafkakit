@@ -1,0 +1,28 @@
+-- name: TryLockInboxKey :one
+INSERT INTO inbox_key_locks(key, owner, locked_at, stale_at)
+VALUES (
+    sqlc.arg(key)::text,
+    sqlc.arg(owner)::text,
+    (now() AT TIME ZONE 'UTC'),
+    sqlc.arg(stale_at)::timestamptz
+)
+ON CONFLICT (key) DO UPDATE
+SET owner     = EXCLUDED.owner,
+    locked_at = EXCLUDED.locked_at,
+    stale_at  = EXCLUDED.stale_at
+WHERE inbox_key_locks.stale_at <= (now() AT TIME ZONE 'UTC')
+RETURNING key, owner, locked_at, stale_at;
+
+-- name: UnlockInboxKey :exec
+DELETE FROM inbox_key_locks
+WHERE key = sqlc.arg(key)::text
+  AND owner = sqlc.arg(owner)::text;
+
+-- name: GetInboxKeyLock :one
+SELECT key, owner, locked_at, stale_at
+FROM inbox_key_locks
+WHERE key = sqlc.arg(key)::text;
+
+-- name: DeleteStaleInboxKeyLocks :exec
+DELETE FROM inbox_key_locks
+WHERE stale_at <= (now() AT TIME ZONE 'UTC');
