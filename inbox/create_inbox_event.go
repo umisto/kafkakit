@@ -16,7 +16,7 @@ import (
 func (b Box) CreateInboxEvent(
 	ctx context.Context,
 	message kafka.Message,
-) (InboxEvent, error) {
+) (Event, error) {
 	headers := map[string][]byte{}
 	for _, h := range message.Headers {
 		headers[h.Key] = h.Value
@@ -24,31 +24,31 @@ func (b Box) CreateInboxEvent(
 
 	eventIDBytes, ok := headers[header.EventID]
 	if !ok {
-		return InboxEvent{}, fmt.Errorf("missing %s header", header.EventID)
+		return Event{}, fmt.Errorf("missing %s header", header.EventID)
 	}
 	eventID, err := uuid.ParseBytes(eventIDBytes)
 	if err != nil {
-		return InboxEvent{}, fmt.Errorf("invalid %s header", header.EventID)
+		return Event{}, fmt.Errorf("invalid %s header", header.EventID)
 	}
 
 	eventTypeBytes, ok := headers[header.EventType]
 	if !ok {
-		return InboxEvent{}, fmt.Errorf("missing %s header", header.EventType)
+		return Event{}, fmt.Errorf("missing %s header", header.EventType)
 	}
 
 	eventVersionBytes, ok := headers[header.EventVersion]
 	if !ok {
-		return InboxEvent{}, fmt.Errorf("missing %s header", header.EventVersion)
+		return Event{}, fmt.Errorf("missing %s header", header.EventVersion)
 	}
 	v64, err := strconv.ParseInt(string(eventVersionBytes), 10, 32)
 	if err != nil {
-		return InboxEvent{}, fmt.Errorf("invalid %s header", header.EventVersion)
+		return Event{}, fmt.Errorf("invalid %s header", header.EventVersion)
 	}
 	eventVersion := int32(v64)
 
 	producerBytes, ok := headers[header.Producer]
 	if !ok {
-		return InboxEvent{}, fmt.Errorf("missing %s header", header.Producer)
+		return Event{}, fmt.Errorf("missing %s header", header.Producer)
 	}
 
 	res, err := b.queries(ctx).CreateInboxEvent(ctx, pgdb.CreateInboxEventParams{
@@ -64,9 +64,9 @@ func (b Box) CreateInboxEvent(
 	})
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return InboxEvent{}, nil
+		return Event{}, nil
 	case err != nil:
-		return InboxEvent{}, err
+		return Event{}, err
 	}
 
 	return convertInboxEvent(res), nil

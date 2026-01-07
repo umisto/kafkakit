@@ -14,32 +14,32 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-type InboxEventStatus string
+type EventStatus string
 
-func (e InboxEventStatus) String() string {
+func (e EventStatus) String() string {
 	return string(e)
 }
 
-func (e InboxEventStatus) IsValid() bool {
+func (e EventStatus) IsValid() bool {
 	switch e {
-	case InboxStatusPending, InboxStatusProcessed, InboxStatusFailed:
+	case StatusPending, StatusProcessed, StatusFailed:
 		return true
 	default:
 		return false
 	}
 }
 
-func (e InboxEventStatus) pgdb() pgdb.InboxEventStatus {
+func (e EventStatus) pgdb() pgdb.InboxEventStatus {
 	return pgdb.InboxEventStatus(e.String())
 }
 
 const (
-	InboxStatusPending   InboxEventStatus = "pending"
-	InboxStatusProcessed InboxEventStatus = "processed"
-	InboxStatusFailed    InboxEventStatus = "failed"
+	StatusPending   EventStatus = "pending"
+	StatusProcessed EventStatus = "processed"
+	StatusFailed    EventStatus = "failed"
 )
 
-type InboxEvent struct {
+type Event struct {
 	ID             uuid.UUID
 	Seq            int64
 	Topic          string
@@ -48,7 +48,7 @@ type InboxEvent struct {
 	Version        int32
 	Producer       string
 	Payload        json.RawMessage
-	Status         InboxEventStatus
+	Status         EventStatus
 	Attempts       int32
 	LastError      *string
 	LastAttemptAt  time.Time
@@ -59,7 +59,7 @@ type InboxEvent struct {
 	ProcessedAt    *time.Time
 }
 
-func (e InboxEvent) ToMessage() kafka.Message {
+func (e Event) ToMessage() kafka.Message {
 	return kafka.Message{
 		Topic: e.Topic,
 		Key:   []byte(e.Key),
@@ -89,12 +89,12 @@ func (e InboxEvent) ToMessage() kafka.Message {
 	}
 }
 
-func (e InboxEvent) IsNil() bool {
+func (e Event) IsNil() bool {
 	return e.ID == uuid.Nil
 }
 
-func convertInboxEvent(ie pgdb.InboxEvent) InboxEvent {
-	res := InboxEvent{
+func convertInboxEvent(ie pgdb.InboxEvent) Event {
+	res := Event{
 		ID:            ie.ID,
 		Seq:           ie.Seq,
 		Topic:         ie.Topic,
@@ -103,7 +103,7 @@ func convertInboxEvent(ie pgdb.InboxEvent) InboxEvent {
 		Version:       ie.Version,
 		Producer:      ie.Producer,
 		Payload:       ie.Payload,
-		Status:        InboxEventStatus(ie.Status),
+		Status:        EventStatus(ie.Status),
 		Attempts:      ie.Attempts,
 		LastAttemptAt: ie.LastAttemptAt,
 		CreatedAt:     ie.CreatedAt,

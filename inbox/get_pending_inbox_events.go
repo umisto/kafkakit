@@ -12,7 +12,7 @@ func (b Box) GetPendingInboxEvents(
 	ctx context.Context,
 	owner string,
 	limit int32,
-) (key string, events []InboxEvent, err error) {
+) (key string, events []Event, err error) {
 	key, err = b.queries(ctx).PickPendingInboxKey(ctx)
 	if err == sql.ErrNoRows {
 		return "", nil, nil
@@ -45,7 +45,7 @@ func (b Box) GetPendingInboxEvents(
 		return key, nil, nil
 	}
 
-	events = make([]InboxEvent, 0, len(rows))
+	events = make([]Event, 0, len(rows))
 	for _, row := range rows {
 		events = append(events, convertInboxEvent(row))
 	}

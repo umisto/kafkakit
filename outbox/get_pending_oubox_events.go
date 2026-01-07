@@ -13,7 +13,7 @@ func (b Box) GetPendingOutboxEvents(
 	ctx context.Context,
 	owner string,
 	limit int32,
-) (key string, events []OutboxEvent, err error) {
+) (key string, events []Event, err error) {
 
 	key, err = b.queries(ctx).PickPendingOutboxKey(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -47,7 +47,7 @@ func (b Box) GetPendingOutboxEvents(
 		return key, nil, nil
 	}
 
-	events = make([]OutboxEvent, 0, len(rows))
+	events = make([]Event, 0, len(rows))
 	for _, row := range rows {
 		events = append(events, convertOutboxEvent(row))
 	}

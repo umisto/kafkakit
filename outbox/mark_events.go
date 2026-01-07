@@ -11,7 +11,7 @@ import (
 func (b Box) MarkOutboxEventsAsSent(
 	ctx context.Context,
 	ids ...uuid.UUID,
-) ([]OutboxEvent, error) {
+) ([]Event, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -21,7 +21,7 @@ func (b Box) MarkOutboxEventsAsSent(
 		return nil, err
 	}
 
-	events := make([]OutboxEvent, 0, len(rows))
+	events := make([]Event, 0, len(rows))
 	for _, row := range rows {
 		events = append(events, convertOutboxEvent(row))
 	}
@@ -33,7 +33,7 @@ func (b Box) MarkOutboxEventsAsPending(
 	ctx context.Context,
 	nextRetryAt time.Time,
 	ids ...uuid.UUID,
-) ([]OutboxEvent, error) {
+) ([]Event, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -46,7 +46,7 @@ func (b Box) MarkOutboxEventsAsPending(
 		return nil, err
 	}
 
-	events := make([]OutboxEvent, 0, len(rows))
+	events := make([]Event, 0, len(rows))
 	for _, row := range rows {
 		events = append(events, convertOutboxEvent(row))
 	}
@@ -57,7 +57,7 @@ func (b Box) MarkOutboxEventsAsPending(
 func (b Box) MarkOutboxEventsAsFailed(
 	ctx context.Context,
 	ids ...uuid.UUID,
-) ([]OutboxEvent, error) {
+) ([]Event, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -67,7 +67,7 @@ func (b Box) MarkOutboxEventsAsFailed(
 		return nil, err
 	}
 
-	events := make([]OutboxEvent, 0, len(rows))
+	events := make([]Event, 0, len(rows))
 	for _, row := range rows {
 		events = append(events, convertOutboxEvent(row))
 	}

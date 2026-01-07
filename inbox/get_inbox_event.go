@@ -11,13 +11,13 @@ import (
 func (b Box) GetInboxEvent(
 	ctx context.Context,
 	ID uuid.UUID,
-) (InboxEvent, error) {
+) (Event, error) {
 	res, err := b.queries(ctx).GetInboxEventByID(ctx, ID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return InboxEvent{}, nil
+		return Event{}, nil
 	case err != nil:
-		return InboxEvent{}, err
+		return Event{}, err
 	}
 
 	return convertInboxEvent(res), nil

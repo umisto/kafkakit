@@ -32,33 +32,32 @@ func (b Box) Transaction(ctx context.Context, fn func(ctx context.Context) error
 	return pgx.Transaction(b.db, ctx, fn)
 }
 
-type OutboxEventStatus string
+type EventStatus string
 
-func (e OutboxEventStatus) String() string {
+func (e EventStatus) String() string {
 	return string(e)
 }
 
-func (e OutboxEventStatus) IsValid() bool {
+func (e EventStatus) IsValid() bool {
 	switch e {
-	case OutboxStatusPending, OutboxStatusProcessing, OutboxStatusSent, OutboxStatusFailed:
+	case StatusPending, StatusSent, StatusFailed:
 		return true
 	default:
 		return false
 	}
 }
 
-func (e OutboxEventStatus) pgdb() pgdb.OutboxEventStatus {
+func (e EventStatus) pgdb() pgdb.OutboxEventStatus {
 	return pgdb.OutboxEventStatus(e.String())
 }
 
 const (
-	OutboxStatusPending    OutboxEventStatus = "pending"
-	OutboxStatusProcessing OutboxEventStatus = "processing"
-	OutboxStatusSent       OutboxEventStatus = "sent"
-	OutboxStatusFailed     OutboxEventStatus = "failed"
+	StatusPending EventStatus = "pending"
+	StatusSent    EventStatus = "sent"
+	StatusFailed  EventStatus = "failed"
 )
 
-type OutboxEvent struct {
+type Event struct {
 	ID            uuid.UUID
 	Seq           int64
 	Topic         string
@@ -67,7 +66,7 @@ type OutboxEvent struct {
 	Version       int32
 	Producer      string
 	Payload       json.RawMessage
-	Status        OutboxEventStatus
+	Status        EventStatus
 	Attempts      int32
 	LastAttemptAt *time.Time
 	CreatedAt     time.Time
@@ -75,8 +74,8 @@ type OutboxEvent struct {
 	SentAt        *time.Time
 }
 
-func convertOutboxEvent(oe pgdb.OutboxEvent) OutboxEvent {
-	res := OutboxEvent{
+func convertOutboxEvent(oe pgdb.OutboxEvent) Event {
+	res := Event{
 		ID:          oe.ID,
 		Seq:         oe.Seq,
 		Topic:       oe.Topic,
@@ -85,7 +84,7 @@ func convertOutboxEvent(oe pgdb.OutboxEvent) OutboxEvent {
 		Version:     oe.Version,
 		Producer:    oe.Producer,
 		Payload:     oe.Payload,
-		Status:      OutboxEventStatus(oe.Status),
+		Status:      EventStatus(oe.Status),
 		Attempts:    oe.Attempts,
 		CreatedAt:   oe.CreatedAt,
 		NextRetryAt: oe.NextRetryAt,
@@ -101,7 +100,7 @@ func convertOutboxEvent(oe pgdb.OutboxEvent) OutboxEvent {
 	return res
 }
 
-func (e OutboxEvent) ToMessage() kafka.Message {
+func (e Event) ToMessage() kafka.Message {
 	return kafka.Message{
 		Topic: e.Topic,
 		Key:   []byte(e.Key),

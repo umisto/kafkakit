@@ -11,7 +11,7 @@ import (
 func (b Box) MarkInboxEventsAsProcessed(
 	ctx context.Context,
 	ids ...uuid.UUID,
-) ([]InboxEvent, error) {
+) ([]Event, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -21,7 +21,7 @@ func (b Box) MarkInboxEventsAsProcessed(
 		return nil, err
 	}
 
-	events := make([]InboxEvent, 0, len(rows))
+	events := make([]Event, 0, len(rows))
 	for _, row := range rows {
 		events = append(events, convertInboxEvent(row))
 	}
@@ -32,7 +32,7 @@ func (b Box) MarkInboxEventsAsProcessed(
 func (b Box) MarkInboxEventsAsFailed(
 	ctx context.Context,
 	ids ...uuid.UUID,
-) ([]InboxEvent, error) {
+) ([]Event, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -42,7 +42,7 @@ func (b Box) MarkInboxEventsAsFailed(
 		return nil, err
 	}
 
-	events := make([]InboxEvent, 0, len(rows))
+	events := make([]Event, 0, len(rows))
 	for _, row := range rows {
 		events = append(events, convertInboxEvent(row))
 	}
@@ -54,7 +54,7 @@ func (b Box) MarkInboxEventsAsPending(
 	ctx context.Context,
 	nextRetryAt time.Time,
 	ids ...uuid.UUID,
-) ([]InboxEvent, error) {
+) ([]Event, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -67,7 +67,7 @@ func (b Box) MarkInboxEventsAsPending(
 		return nil, err
 	}
 
-	events := make([]InboxEvent, 0, len(rows))
+	events := make([]Event, 0, len(rows))
 	for _, row := range rows {
 		events = append(events, convertInboxEvent(row))
 	}

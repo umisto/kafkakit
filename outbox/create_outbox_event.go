@@ -11,8 +11,8 @@ import (
 
 func (b Box) CreateOutboxEvent(
 	ctx context.Context,
-	event OutboxEvent,
-) (OutboxEvent, error) {
+	event Event,
+) (Event, error) {
 	row, err := b.queries(ctx).CreateOutboxEvent(ctx, pgdb.CreateOutboxEventParams{
 		ID:       event.ID,
 		Topic:    event.Topic,
@@ -23,7 +23,7 @@ func (b Box) CreateOutboxEvent(
 		Payload:  event.Payload,
 	})
 	if err != nil {
-		return OutboxEvent{}, err
+		return Event{}, err
 	}
 	return convertOutboxEvent(row), nil
 }
@@ -31,13 +31,13 @@ func (b Box) CreateOutboxEvent(
 func (b Box) GetOutboxEvent(
 	ctx context.Context,
 	id uuid.UUID,
-) (OutboxEvent, error) {
+) (Event, error) {
 	row, err := b.queries(ctx).GetOutboxEventByID(ctx, id)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return OutboxEvent{}, nil
+		return Event{}, nil
 	case err != nil:
-		return OutboxEvent{}, err
+		return Event{}, err
 	}
 	return convertOutboxEvent(row), nil
 }

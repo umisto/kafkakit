@@ -10,7 +10,7 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-type InboxHandler func(ctx context.Context, event InboxEvent) error
+type InboxHandler func(ctx context.Context, event Event) error
 
 func (b Box) WriteAndHandle(
 	ctx context.Context,
