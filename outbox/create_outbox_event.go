@@ -4,23 +4,61 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strconv"
 
 	"github.com/google/uuid"
+	"github.com/netbill/evebox/header"
 	"github.com/netbill/evebox/pgdb"
+	"github.com/segmentio/kafka-go"
 )
 
 func (b Box) CreateOutboxEvent(
 	ctx context.Context,
-	event Event,
+	message kafka.Message,
 ) (Event, error) {
+	headers := map[string][]byte{}
+	for _, h := range message.Headers {
+		headers[h.Key] = h.Value
+	}
+
+	eventIDBytes, ok := headers[header.EventID]
+	if !ok {
+		return Event{}, fmt.Errorf("missing %s header", header.EventID)
+	}
+	eventID, err := uuid.ParseBytes(eventIDBytes)
+	if err != nil {
+		return Event{}, fmt.Errorf("invalid %s header", header.EventID)
+	}
+
+	eventTypeBytes, ok := headers[header.EventType]
+	if !ok {
+		return Event{}, fmt.Errorf("missing %s header", header.EventType)
+	}
+
+	eventVersionBytes, ok := headers[header.EventVersion]
+	if !ok {
+		return Event{}, fmt.Errorf("missing %s header", header.EventVersion)
+	}
+	v64, err := strconv.ParseInt(string(eventVersionBytes), 10, 32)
+	if err != nil {
+		return Event{}, fmt.Errorf("invalid %s header", header.EventVersion)
+	}
+	eventVersion := int32(v64)
+
+	producerBytes, ok := headers[header.Producer]
+	if !ok {
+		return Event{}, fmt.Errorf("missing %s header", header.Producer)
+	}
+
 	row, err := b.queries(ctx).CreateOutboxEvent(ctx, pgdb.CreateOutboxEventParams{
-		ID:       event.ID,
-		Topic:    event.Topic,
-		Key:      event.Key,
-		Type:     event.Type,
-		Version:  event.Version,
-		Producer: event.Producer,
-		Payload:  event.Payload,
+		ID:       eventID,
+		Topic:    message.Topic,
+		Key:      string(message.Key),
+		Type:     string(eventTypeBytes),
+		Version:  eventVersion,
+		Producer: string(producerBytes),
+		Payload:  message.Value,
 	})
 	if err != nil {
 		return Event{}, err

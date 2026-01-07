@@ -51,8 +51,7 @@ func (b Box) WriteAndHandle(
 
 		switch status {
 		case EventStatusPending:
-			retryAfter := 30 * time.Second
-			next := time.Now().UTC().Add(retryAfter)
+			next := time.Now().UTC().Add(30 * time.Second)
 
 			if _, err = b.MarkInboxEventsAsPending(ctx, next, event.ID); err != nil {
 				return err
