@@ -22,7 +22,7 @@ func (e EventStatus) String() string {
 
 func (e EventStatus) IsValid() bool {
 	switch e {
-	case StatusPending, StatusProcessed, StatusFailed:
+	case EventStatusPending, EventStatusProcessed, EventStatusFailed:
 		return true
 	default:
 		return false
@@ -34,9 +34,9 @@ func (e EventStatus) pgdb() pgdb.InboxEventStatus {
 }
 
 const (
-	StatusPending   EventStatus = "pending"
-	StatusProcessed EventStatus = "processed"
-	StatusFailed    EventStatus = "failed"
+	EventStatusPending   EventStatus = "pending"
+	EventStatusProcessed EventStatus = "processed"
+	EventStatusFailed    EventStatus = "failed"
 )
 
 type Event struct {

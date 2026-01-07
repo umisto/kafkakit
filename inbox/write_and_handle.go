@@ -3,6 +3,7 @@ package inbox
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,19 +11,18 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-type InboxHandler func(ctx context.Context, event Event) error
+type Handler func(ctx context.Context, event Event) EventStatus
 
 func (b Box) WriteAndHandle(
 	ctx context.Context,
 	message kafka.Message,
 	owner string,
-	handler InboxHandler,
+	handler Handler,
 ) error {
 	event, err := b.CreateInboxEvent(ctx, message)
 	if err != nil {
 		return err
 	}
-
 	if event.ID == uuid.Nil {
 		return nil
 	}
@@ -47,16 +47,33 @@ func (b Box) WriteAndHandle(
 			})
 		}()
 
-		if err = handler(ctx, event); err != nil {
-			_, err = b.MarkInboxEventsAsPending(
-				ctx,
-				time.Now().UTC().Add(30*time.Second),
-				event.ID,
-			)
-			return err
-		}
+		status := handler(ctx, event)
 
-		_, err = b.MarkInboxEventsAsProcessed(ctx, event.ID)
-		return err
+		switch status {
+		case EventStatusPending:
+			retryAfter := 30 * time.Second
+			next := time.Now().UTC().Add(retryAfter)
+
+			if _, err = b.MarkInboxEventsAsPending(ctx, next, event.ID); err != nil {
+				return err
+			}
+
+			if err = b.BlockInboxKeyUntil(ctx, event.Key, next); err != nil {
+				return err
+			}
+
+			return nil
+
+		case EventStatusProcessed:
+			_, err = b.MarkInboxEventsAsProcessed(ctx, event.ID)
+			return err
+
+		case EventStatusFailed:
+			_, err = b.MarkInboxEventsAsFailed(ctx, event.ID)
+			return err
+
+		default:
+			return fmt.Errorf("unknown event status: %s", status)
+		}
 	})
 }
