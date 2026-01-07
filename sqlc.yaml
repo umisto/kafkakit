@@ -1,9 +1,9 @@
 version: "2"
 sql:
-  - schema: box/pgdb/schema
-    queries: box/pgdb/queries
+  - schema: pgdb/schema
+    queries: pgdb/queries
     engine: postgresql
     gen:
       go:
         package: pgdb
-        out: box/pgdb
+        out: pgdb

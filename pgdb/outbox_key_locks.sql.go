@@ -10,18 +10,6 @@ import (
 	"time"
 )
 
-const clearOutboxKeyStateBlock = `-- name: ClearOutboxKeyStateBlock :exec
-UPDATE outbox_key_state
-SET blocked_until = NULL,
-    updated_at = (now() AT TIME ZONE 'UTC')
-WHERE key = $1::text
-`
-
-func (q *Queries) ClearOutboxKeyStateBlock(ctx context.Context, key string) error {
-	_, err := q.db.ExecContext(ctx, clearOutboxKeyStateBlock, key)
-	return err
-}
-
 const deleteStaleOutboxKeyLocks = `-- name: DeleteStaleOutboxKeyLocks :exec
 DELETE FROM outbox_key_locks
 WHERE stale_at <= (now() AT TIME ZONE 'UTC')
@@ -32,26 +20,19 @@ func (q *Queries) DeleteStaleOutboxKeyLocks(ctx context.Context) error {
 	return err
 }
 
-const getOutboxKeyState = `-- name: GetOutboxKeyState :one
-SELECT key, blocked_until, updated_at
-FROM outbox_key_state
-WHERE key = $1::text
-`
-
-func (q *Queries) GetOutboxKeyState(ctx context.Context, key string) (OutboxKeyState, error) {
-	row := q.db.QueryRowContext(ctx, getOutboxKeyState, key)
-	var i OutboxKeyState
-	err := row.Scan(&i.Key, &i.BlockedUntil, &i.UpdatedAt)
-	return i, err
-}
-
 const tryLockOutboxKey = `-- name: TryLockOutboxKey :one
 INSERT INTO outbox_key_locks(key, owner, locked_at, stale_at)
-VALUES (
+SELECT
     $1::text,
     $2::text,
     (now() AT TIME ZONE 'UTC'),
     $3::timestamptz
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM outbox_key_state ks
+    WHERE ks.key = $1::text
+        AND ks.blocked_until IS NOT NULL
+        AND ks.blocked_until > (now() AT TIME ZONE 'UTC')
 )
 ON CONFLICT (key) DO UPDATE
 SET owner     = EXCLUDED.owner,
@@ -92,27 +73,5 @@ type UnlockOutboxKeyParams struct {
 
 func (q *Queries) UnlockOutboxKey(ctx context.Context, arg UnlockOutboxKeyParams) error {
 	_, err := q.db.ExecContext(ctx, unlockOutboxKey, arg.Key, arg.Owner)
-	return err
-}
-
-const upsertOutboxKeyStateBlock = `-- name: UpsertOutboxKeyStateBlock :exec
-INSERT INTO outbox_key_state(key, blocked_until, updated_at)
-VALUES (
-    $1::text,
-    $2::timestamptz,
-    (now() AT TIME ZONE 'UTC')
-)
-ON CONFLICT (key) DO UPDATE
-SET blocked_until = EXCLUDED.blocked_until,
-    updated_at = (now() AT TIME ZONE 'UTC')
-`
-
-type UpsertOutboxKeyStateBlockParams struct {
-	Key          string
-	BlockedUntil time.Time
-}
-
-func (q *Queries) UpsertOutboxKeyStateBlock(ctx context.Context, arg UpsertOutboxKeyStateBlockParams) error {
-	_, err := q.db.ExecContext(ctx, upsertOutboxKeyStateBlock, arg.Key, arg.BlockedUntil)
 	return err
 }

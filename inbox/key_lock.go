@@ -3,6 +3,7 @@ package inbox
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/netbill/evebox/pgdb"
@@ -12,14 +13,14 @@ func (b Box) LockInboxKey(
 	ctx context.Context,
 	key string,
 	owner string,
-	ttl time.Duration,
+	nextRetryAt time.Time,
 ) (bool, error) {
 	_, err := b.queries(ctx).TryLockInboxKey(ctx, pgdb.TryLockInboxKeyParams{
 		Key:     key,
 		Owner:   owner,
-		StaleAt: time.Now().UTC().Add(ttl),
+		StaleAt: nextRetryAt,
 	})
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {

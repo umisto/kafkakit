@@ -13,12 +13,12 @@ func (b Box) LockOutboxKey(
 	ctx context.Context,
 	key string,
 	owner string,
-	ttl time.Duration,
+	nextRetryAt time.Time,
 ) (bool, error) {
 	_, err := b.queries(ctx).TryLockOutboxKey(ctx, pgdb.TryLockOutboxKeyParams{
 		Key:     key,
 		Owner:   owner,
-		StaleAt: time.Now().UTC().Add(ttl),
+		StaleAt: nextRetryAt,
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil

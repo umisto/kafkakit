@@ -40,11 +40,17 @@ func (q *Queries) GetInboxKeyLock(ctx context.Context, key string) (InboxKeyLock
 
 const tryLockInboxKey = `-- name: TryLockInboxKey :one
 INSERT INTO inbox_key_locks(key, owner, locked_at, stale_at)
-VALUES (
+SELECT
     $1::text,
     $2::text,
     (now() AT TIME ZONE 'UTC'),
     $3::timestamptz
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM inbox_key_state ks
+    WHERE ks.key = $1::text
+        AND ks.blocked_until IS NOT NULL
+        AND ks.blocked_until > (now() AT TIME ZONE 'UTC')
 )
 ON CONFLICT (key) DO UPDATE
 SET owner     = EXCLUDED.owner,

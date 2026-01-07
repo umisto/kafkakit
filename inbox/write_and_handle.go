@@ -3,6 +3,7 @@ package inbox
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -19,21 +20,21 @@ func (b Box) WriteAndHandle(
 	owner string,
 	handler Handler,
 ) error {
-	event, err := b.CreateInboxEvent(ctx, message)
-	if err != nil {
-		return err
-	}
-	if event.ID == uuid.Nil {
-		return nil
-	}
-
 	return b.Transaction(ctx, func(ctx context.Context) error {
+		event, err := b.CreateInboxEvent(ctx, message)
+		if err != nil {
+			return err
+		}
+		if event.ID == uuid.Nil {
+			return nil
+		}
+
 		_, err = b.queries(ctx).TryLockInboxKey(ctx, pgdb.TryLockInboxKeyParams{
 			Key:     event.Key,
 			Owner:   owner,
 			StaleAt: time.Now().UTC().Add(6 * time.Hour),
 		})
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {

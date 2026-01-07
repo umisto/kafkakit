@@ -108,9 +108,9 @@ type InboxEvent struct {
 	Type           string
 	Version        int32
 	Producer       string
-	Payload  json.RawMessage
-	Status   InboxEventStatus
-	Attempts int32
+	Payload        json.RawMessage
+	Status         InboxEventStatus
+	Attempts       int32
 	LastAttemptAt  time.Time
 	CreatedAt      time.Time
 	KafkaPartition sql.NullInt32
@@ -140,9 +140,9 @@ type OutboxEvent struct {
 	Type          string
 	Version       int32
 	Producer      string
-	Payload  json.RawMessage
-	Status   OutboxEventStatus
-	Attempts int32
+	Payload       json.RawMessage
+	Status        OutboxEventStatus
+	Attempts      int32
 	LastAttemptAt sql.NullTime
 	CreatedAt     time.Time
 	NextRetryAt   time.Time
