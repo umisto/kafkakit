@@ -13,11 +13,11 @@ type Worker struct {
 	log    logium.Logger
 	addr   []string
 	outbox Box
-	cfg    Config
+	cfg    WorkerConfig
 }
 
-type Config struct {
-	Owner string
+type WorkerConfig struct {
+	Name string
 
 	BatchLimit int32
 
@@ -38,7 +38,7 @@ type Config struct {
 	Balancer     kafka.Balancer
 }
 
-func NewWorker(log logium.Logger, ob Box, addr []string, cfg Config) *Worker {
+func NewWorker(log logium.Logger, ob Box, addr []string, cfg WorkerConfig) *Worker {
 	if cfg.BatchLimit <= 0 {
 		cfg.BatchLimit = 100
 	}
@@ -137,17 +137,17 @@ func (w *Worker) tick(ctx context.Context, writer *kafka.Writer) bool {
 		return false
 	}
 
-	ok, err := w.outbox.LockOutboxKey(ctx, key, w.cfg.Owner, time.Now().UTC().Add(w.cfg.LockTTL))
+	ok, err := w.outbox.LockOutboxKey(ctx, key, w.cfg.Name, time.Now().UTC().Add(w.cfg.LockTTL))
 	if err != nil {
 		w.log.Errorf("outbox.LockOutboxKey(key=%s): %v", key, err)
-		return true
+		return false
 	}
 	if !ok {
-		return true
+		return false
 	}
 
 	defer func() {
-		if err = w.outbox.UnlockOutboxKey(ctx, key, w.cfg.Owner); err != nil {
+		if err = w.outbox.UnlockOutboxKey(ctx, key, w.cfg.Name); err != nil {
 			w.log.Errorf("outbox.UnlockOutboxKey(key=%s): %v", key, err)
 		}
 	}()
@@ -163,7 +163,7 @@ func (w *Worker) tick(ctx context.Context, writer *kafka.Writer) bool {
 	})
 	if err != nil {
 		w.log.Errorf("outbox.ClaimPendingOutboxEvents(key=%s): %v", key, err)
-		return true
+		return false
 	}
 	if len(events) == 0 {
 		return false
@@ -208,8 +208,12 @@ func (w *Worker) tick(ctx context.Context, writer *kafka.Writer) bool {
 	})
 	if err != nil {
 		w.log.Errorf("outbox: finalize tx failed key=%s: %v", key, err)
-		return true
+		return false
 	}
+
+	w.log.Debugf("outbox: name %s, key=%s, sent=%d pending=%d",
+		w.cfg.Name, key, len(sent), len(pending),
+	)
 
 	return true
 }

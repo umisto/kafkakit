@@ -11,12 +11,12 @@ import (
 type Worker struct {
 	log      logium.Logger
 	store    Box
-	cfg      Config
+	cfg      ConfigWorker
 	handlers map[string]Handler
 }
 
-type Config struct {
-	Owner     string
+type ConfigWorker struct {
+	Name      string
 	BatchSize int32
 
 	RetryDelay time.Duration
@@ -29,7 +29,7 @@ type Config struct {
 	Unknown func(ctx context.Context, ev Event) EventStatus
 }
 
-func NewWorker(log logium.Logger, store Box, cfg Config) *Worker {
+func NewWorker(log logium.Logger, store Box, cfg ConfigWorker) *Worker {
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = 50
 	}
@@ -109,7 +109,7 @@ func (w *Worker) tick(ctx context.Context) bool {
 			return err
 		}
 
-		locked, err := w.store.LockInboxKey(txCtx, key, w.cfg.Owner, time.Now().UTC().Add(w.cfg.LockTTL))
+		locked, err := w.store.LockInboxKey(txCtx, key, w.cfg.Name, time.Now().UTC().Add(w.cfg.LockTTL))
 		if err != nil {
 			w.log.Errorf("failed to lock inbox key=%s: %v", key, err)
 			return err
@@ -117,7 +117,7 @@ func (w *Worker) tick(ctx context.Context) bool {
 		if !locked {
 			return nil
 		}
-		defer func() { _ = w.store.UnlockInboxKey(txCtx, key, w.cfg.Owner) }()
+		defer func() { _ = w.store.UnlockInboxKey(txCtx, key, w.cfg.Name) }()
 
 		events, err := w.store.GetPendingInboxEvents(txCtx, key, w.cfg.BatchSize)
 		if err != nil {
