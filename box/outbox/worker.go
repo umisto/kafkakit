@@ -147,8 +147,8 @@ func (w *Worker) tick(ctx context.Context, writer *kafka.Writer) bool {
 	}
 
 	defer func() {
-		if err = w.outbox.UnlockOutboxKey(ctx, key, w.cfg.Name); err != nil {
-			w.log.Errorf("outbox.UnlockOutboxKey(key=%s): %v", key, err)
+		if deferr := w.outbox.UnlockOutboxKey(ctx, key, w.cfg.Name); deferr != nil {
+			w.log.Errorf("outbox.UnlockOutboxKey(key=%s): %v", key, deferr)
 		}
 	}()
 
@@ -156,12 +156,11 @@ func (w *Worker) tick(ctx context.Context, writer *kafka.Writer) bool {
 
 	var events []Event
 
-	err = w.outbox.Transaction(ctx, func(txCtx context.Context) error {
+	if err = w.outbox.Transaction(ctx, func(txCtx context.Context) error {
 		var txErr error
 		events, txErr = w.outbox.ClaimPendingOutboxEvents(txCtx, key, w.cfg.BatchLimit, leaseUntil)
 		return txErr
-	})
-	if err != nil {
+	}); err != nil {
 		w.log.Errorf("outbox.ClaimPendingOutboxEvents(key=%s): %v", key, err)
 		return false
 	}
@@ -181,32 +180,33 @@ func (w *Worker) tick(ctx context.Context, writer *kafka.Writer) bool {
 		sent = append(sent, e.ID)
 	}
 
-	err = w.outbox.Transaction(ctx, func(txCtx context.Context) error {
+	if err = w.outbox.Transaction(ctx, func(txCtx context.Context) error {
+		var txErr error
+
 		if len(sent) > 0 {
-			if _, err = w.outbox.MarkOutboxEventsAsSent(txCtx, sent...); err != nil {
-				return err
+			if _, txErr = w.outbox.MarkOutboxEventsAsSent(txCtx, sent...); txErr != nil {
+				return txErr
 			}
 		}
 
 		if len(pending) > 0 {
 			nextRetryAt := time.Now().UTC().Add(w.cfg.EventRetryDelay)
 
-			if _, err = w.outbox.MarkOutboxEventsAsPending(txCtx, nextRetryAt, pending...); err != nil {
-				return err
+			if _, txErr = w.outbox.MarkOutboxEventsAsPending(txCtx, nextRetryAt, pending...); txErr != nil {
+				return txErr
 			}
 
-			if err = w.outbox.BlockOutboxKeyUntil(txCtx, key, time.Now().UTC().Add(w.cfg.KeyBlockDelay)); err != nil {
-				return err
+			if txErr = w.outbox.BlockOutboxKeyUntil(txCtx, key, time.Now().UTC().Add(w.cfg.KeyBlockDelay)); txErr != nil {
+				return txErr
 			}
 		} else {
-			if err = w.outbox.UnblockOutboxKey(txCtx, key); err != nil {
-				return err
+			if txErr = w.outbox.UnblockOutboxKey(txCtx, key); txErr != nil {
+				return txErr
 			}
 		}
 
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		w.log.Errorf("outbox: finalize tx failed key=%s: %v", key, err)
 		return false
 	}
@@ -215,5 +215,8 @@ func (w *Worker) tick(ctx context.Context, writer *kafka.Writer) bool {
 		w.cfg.Name, key, len(sent), len(pending),
 	)
 
-	return true
+	if len(sent) > 0 {
+		return true
+	}
+	return false
 }
