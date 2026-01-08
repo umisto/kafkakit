@@ -1,4 +1,4 @@
-package inbox
+package outbox
 
 import (
 	"context"
@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/netbill/evebox/box/pgdb"
 	"github.com/netbill/evebox/header"
-	"github.com/netbill/evebox/pgdb"
 	"github.com/segmentio/kafka-go"
 )
 
-func (b Box) CreateInboxEvent(
+func (b Box) CreateOutboxEvent(
 	ctx context.Context,
 	message kafka.Message,
 ) (Event, error) {
@@ -52,70 +52,68 @@ func (b Box) CreateInboxEvent(
 		return Event{}, fmt.Errorf("missing %s header", header.Producer)
 	}
 
-	res, err := b.queries(ctx).CreateInboxEvent(ctx, pgdb.CreateInboxEventParams{
-		ID:             eventID,
-		Topic:          message.Topic,
-		Key:            string(message.Key),
-		Type:           string(eventTypeBytes),
-		Version:        eventVersion,
-		Producer:       string(producerBytes),
-		Payload:        message.Value,
-		KafkaPartition: sql.NullInt32{Int32: int32(message.Partition), Valid: true},
-		KafkaOffset:    sql.NullInt64{Int64: message.Offset, Valid: true},
+	row, err := b.queries(ctx).CreateOutboxEvent(ctx, pgdb.CreateOutboxEventParams{
+		ID:       eventID,
+		Topic:    message.Topic,
+		Key:      string(message.Key),
+		Type:     string(eventTypeBytes),
+		Version:  eventVersion,
+		Producer: string(producerBytes),
+		Payload:  message.Value,
 	})
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return Event{}, nil
-	case err != nil:
+	if err != nil {
 		return Event{}, err
 	}
 
-	return convertInboxEvent(res), nil
+	return convertOutboxEvent(row), nil
 }
 
-func (b Box) PickPendingInboxKey(
+func (b Box) GetPendingOutboxKey(
 	ctx context.Context,
 ) (string, error) {
-	key, err := b.queries(ctx).PickPendingInboxKey(ctx)
+	key, err := b.queries(ctx).PickPendingOutboxKey(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
 	}
+
 	return key, nil
 }
 
-func (b Box) GetPendingInboxEvents(
+func (b Box) ClaimPendingOutboxEvents(
 	ctx context.Context,
 	key string,
 	limit int32,
+	laseUntil time.Time,
 ) ([]Event, error) {
-	rows, err := b.queries(ctx).GetPendingInboxEventsByKey(ctx, pgdb.GetPendingInboxEventsByKeyParams{
-		Key:   key,
-		Limit: limit,
+	events, err := b.queries(ctx).ClaimPendingOutboxEventsByKey(ctx, pgdb.ClaimPendingOutboxEventsByKeyParams{
+		Key:        key,
+		Limit:      limit,
+		LeaseUntil: laseUntil,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	if len(rows) == 0 {
+	if len(events) == 0 {
 		return nil, nil
 	}
 
-	events := make([]Event, 0, len(rows))
-	for _, row := range rows {
-		events = append(events, convertInboxEvent(row))
+	result := make([]Event, 0, len(events))
+	for _, event := range events {
+		result = append(result, convertOutboxEvent(event))
 	}
 
-	return events, nil
+	return result, nil
 }
 
-func (b Box) GetInboxEvent(
+func (b Box) GetOutboxEvent(
 	ctx context.Context,
-	ID uuid.UUID,
+	id uuid.UUID,
 ) (Event, error) {
-	res, err := b.queries(ctx).GetInboxEventByID(ctx, ID)
+	row, err := b.queries(ctx).GetOutboxEventByID(ctx, id)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Event{}, nil
@@ -123,10 +121,10 @@ func (b Box) GetInboxEvent(
 		return Event{}, err
 	}
 
-	return convertInboxEvent(res), nil
+	return convertOutboxEvent(row), nil
 }
 
-func (b Box) MarkInboxEventsAsProcessed(
+func (b Box) MarkOutboxEventsAsSent(
 	ctx context.Context,
 	ids ...uuid.UUID,
 ) ([]Event, error) {
@@ -134,41 +132,20 @@ func (b Box) MarkInboxEventsAsProcessed(
 		return nil, nil
 	}
 
-	rows, err := b.queries(ctx).MarkInboxEventsAsProcessed(ctx, ids)
+	rows, err := b.queries(ctx).MarkOutboxEventsAsSent(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
 
 	events := make([]Event, 0, len(rows))
 	for _, row := range rows {
-		events = append(events, convertInboxEvent(row))
+		events = append(events, convertOutboxEvent(row))
 	}
 
 	return events, nil
 }
 
-func (b Box) MarkInboxEventsAsFailed(
-	ctx context.Context,
-	ids ...uuid.UUID,
-) ([]Event, error) {
-	if len(ids) == 0 {
-		return nil, nil
-	}
-
-	rows, err := b.queries(ctx).MarkInboxEventsAsFailed(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-
-	events := make([]Event, 0, len(rows))
-	for _, row := range rows {
-		events = append(events, convertInboxEvent(row))
-	}
-
-	return events, nil
-}
-
-func (b Box) MarkInboxEventsAsPending(
+func (b Box) MarkOutboxEventsAsPending(
 	ctx context.Context,
 	nextRetryAt time.Time,
 	ids ...uuid.UUID,
@@ -177,7 +154,7 @@ func (b Box) MarkInboxEventsAsPending(
 		return nil, nil
 	}
 
-	rows, err := b.queries(ctx).MarkInboxEventsAsPending(ctx, pgdb.MarkInboxEventsAsPendingParams{
+	rows, err := b.queries(ctx).MarkOutboxEventsAsPending(ctx, pgdb.MarkOutboxEventsAsPendingParams{
 		Ids:         ids,
 		NextRetryAt: nextRetryAt,
 	})
@@ -187,7 +164,28 @@ func (b Box) MarkInboxEventsAsPending(
 
 	events := make([]Event, 0, len(rows))
 	for _, row := range rows {
-		events = append(events, convertInboxEvent(row))
+		events = append(events, convertOutboxEvent(row))
+	}
+
+	return events, nil
+}
+
+func (b Box) MarkOutboxEventsAsFailed(
+	ctx context.Context,
+	ids ...uuid.UUID,
+) ([]Event, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	rows, err := b.queries(ctx).MarkOutboxEventsAsFailed(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	events := make([]Event, 0, len(rows))
+	for _, row := range rows {
+		events = append(events, convertOutboxEvent(row))
 	}
 
 	return events, nil

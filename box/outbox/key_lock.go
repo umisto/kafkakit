@@ -1,4 +1,4 @@
-package inbox
+package outbox
 
 import (
 	"context"
@@ -6,16 +6,16 @@ import (
 	"errors"
 	"time"
 
-	"github.com/netbill/evebox/pgdb"
+	"github.com/netbill/evebox/box/pgdb"
 )
 
-func (b Box) LockInboxKey(
+func (b Box) LockOutboxKey(
 	ctx context.Context,
 	key string,
 	owner string,
 	nextRetryAt time.Time,
 ) (bool, error) {
-	_, err := b.queries(ctx).TryLockInboxKey(ctx, pgdb.TryLockInboxKeyParams{
+	_, err := b.queries(ctx).TryLockOutboxKey(ctx, pgdb.TryLockOutboxKeyParams{
 		Key:     key,
 		Owner:   owner,
 		StaleAt: nextRetryAt,
@@ -29,12 +29,12 @@ func (b Box) LockInboxKey(
 	return true, nil
 }
 
-func (b Box) UnlockInboxKey(
+func (b Box) UnlockOutboxKey(
 	ctx context.Context,
 	key string,
 	owner string,
 ) error {
-	return b.queries(ctx).UnlockInboxKey(ctx, pgdb.UnlockInboxKeyParams{
+	return b.queries(ctx).UnlockOutboxKey(ctx, pgdb.UnlockOutboxKeyParams{
 		Key:   key,
 		Owner: owner,
 	})

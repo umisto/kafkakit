@@ -7,7 +7,7 @@ CREATE TYPE outbox_event_status AS ENUM (
 );
 
 CREATE TABLE outbox_events (
-    id       UUID   PRIMARY KEY NOT NULL DEFAULT uuid_generate_v4(),
+    id       UUID   PRIMARY KEY NOT NULL,
     seq      BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
 
     topic    TEXT   NOT NULL,
@@ -43,7 +43,7 @@ CREATE TABLE outbox_key_locks (
     key        TEXT PRIMARY KEY,
     owner      TEXT NOT NULL,
     locked_at  TIMESTAMPTZ NOT NULL DEFAULT (now() AT TIME ZONE 'UTC'),
-    stale_at  TIMESTAMPTZ NOT NULL DEFAULT ((now() AT TIME ZONE 'UTC') + interval '6 hours')
+    stale_at  TIMESTAMPTZ NOT NULL DEFAULT ((now() AT TIME ZONE 'UTC') + interval '5 minute')
 );
 
 CREATE INDEX idx_outbox_key_locks_locked_at

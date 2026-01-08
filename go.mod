@@ -6,6 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.10.9
 	github.com/netbill/logium v0.1.0
+	github.com/netbill/msgx v0.0.6
 	github.com/netbill/pgx v0.1.0
 	github.com/segmentio/kafka-go v0.4.49
 )

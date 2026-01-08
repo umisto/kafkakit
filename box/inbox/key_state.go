@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/netbill/evebox/pgdb"
+	"github.com/netbill/evebox/box/pgdb"
 )
 
 func (b Box) BlockInboxKeyUntil(

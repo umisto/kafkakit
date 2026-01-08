@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/netbill/evebox/box/pgdb"
 	"github.com/netbill/evebox/header"
-	"github.com/netbill/evebox/pgdb"
 	"github.com/netbill/pgx"
 	"github.com/segmentio/kafka-go"
 )

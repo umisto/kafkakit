@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/netbill/evebox/pgdb"
+	"github.com/netbill/evebox/box/pgdb"
 	"github.com/segmentio/kafka-go"
 )
 
