@@ -1,43 +1,45 @@
-package inbox
+package consumer
 
 import (
 	"context"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/netbill/evebox/box/inbox"
 	"github.com/netbill/logium"
 )
 
-type Worker struct {
+type InboxWorker struct {
 	log      logium.Logger
-	store    Box
-	cfg      ConfigWorker
-	handlers map[string]Handler
+	store    inbox.Box
+	cfg      InboxConfigWorker
+	handlers map[string]inbox.Handler
 }
 
-type ConfigWorker struct {
-	Name      string
+type InboxConfigWorker struct {
+	Name string
+
+	//BatchSize is the maximum number of events to process in one batch.
 	BatchSize int32
 
+	//RetryDelay is the delay before retrying a failed event.
 	RetryDelay time.Duration
 
+	//MinSleep is the minimum sleep time between ticks when no work is done.
 	MinSleep time.Duration
+	//MaxSleep is the maximum sleep time between ticks when no work is done.
 	MaxSleep time.Duration
 
-	LockTTL time.Duration // вместо BusyDelay — это TTL лока
-
-	Unknown func(ctx context.Context, ev Event) EventStatus
+	//Unknown is the function to call when an unknown event type is encountered.
+	Unknown func(ctx context.Context, ev inbox.Event) inbox.EventStatus
 }
 
-func NewWorker(log logium.Logger, store Box, cfg ConfigWorker) *Worker {
+func NewInboxWorker(log logium.Logger, store inbox.Box, cfg InboxConfigWorker) *InboxWorker {
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = 50
 	}
 	if cfg.RetryDelay <= 0 {
 		cfg.RetryDelay = 1 * time.Minute
-	}
-	if cfg.LockTTL <= 0 {
-		cfg.LockTTL = 60 * time.Second
 	}
 	if cfg.MinSleep <= 0 {
 		cfg.MinSleep = 100 * time.Millisecond
@@ -46,24 +48,24 @@ func NewWorker(log logium.Logger, store Box, cfg ConfigWorker) *Worker {
 		cfg.MaxSleep = 2 * time.Second
 	}
 	if cfg.Unknown == nil {
-		cfg.Unknown = func(ctx context.Context, ev Event) EventStatus {
-			return EventStatusFailed
+		cfg.Unknown = func(ctx context.Context, ev inbox.Event) inbox.EventStatus {
+			return inbox.EventStatusFailed
 		}
 	}
 
-	return &Worker{
+	return &InboxWorker{
 		log:      log,
 		store:    store,
 		cfg:      cfg,
-		handlers: map[string]Handler{},
+		handlers: map[string]inbox.Handler{},
 	}
 }
 
-func (w *Worker) Handle(eventType string, h Handler) {
+func (w *InboxWorker) Handle(eventType string, h inbox.Handler) {
 	w.handlers[eventType] = h
 }
 
-func (w *Worker) Run(ctx context.Context) {
+func (w *InboxWorker) Run(ctx context.Context) {
 	sleep := time.Duration(0)
 
 	for {
@@ -99,7 +101,7 @@ func (w *Worker) Run(ctx context.Context) {
 	}
 }
 
-func (w *Worker) tick(ctx context.Context) bool {
+func (w *InboxWorker) tick(ctx context.Context) bool {
 	worked := false
 
 	err := w.store.Transaction(ctx, func(txCtx context.Context) error {
@@ -109,7 +111,7 @@ func (w *Worker) tick(ctx context.Context) bool {
 			return err
 		}
 
-		locked, err := w.store.LockInboxKey(txCtx, key, w.cfg.Name, time.Now().UTC().Add(w.cfg.LockTTL))
+		locked, err := w.store.LockInboxKey(txCtx, key, w.cfg.Name, time.Now().UTC().Add(w.cfg.RetryDelay))
 		if err != nil {
 			w.log.Errorf("failed to lock inbox key=%s: %v", key, err)
 			return err
@@ -136,7 +138,6 @@ func (w *Worker) tick(ctx context.Context) bool {
 		worked = true
 		return nil
 	})
-
 	if err != nil {
 		return false
 	}
@@ -144,18 +145,18 @@ func (w *Worker) tick(ctx context.Context) bool {
 	return worked
 }
 
-func (w *Worker) processBatch(ctx context.Context, key string, events []Event) error {
+func (w *InboxWorker) processBatch(ctx context.Context, key string, events []inbox.Event) error {
 	processed := make([]uuid.UUID, 0, len(events))
 	pending := make([]uuid.UUID, 0, 1)
 	failed := make([]uuid.UUID, 0, len(events))
 
-	distribute := func(id uuid.UUID, status EventStatus) {
+	distribute := func(id uuid.UUID, status inbox.EventStatus) {
 		switch status {
-		case EventStatusProcessed:
+		case inbox.EventStatusProcessed:
 			processed = append(processed, id)
-		case EventStatusPending:
+		case inbox.EventStatusPending:
 			pending = append(pending, id)
-		case EventStatusFailed:
+		case inbox.EventStatusFailed:
 			failed = append(failed, id)
 		default:
 			failed = append(failed, id)
@@ -163,7 +164,7 @@ func (w *Worker) processBatch(ctx context.Context, key string, events []Event) e
 	}
 
 	for _, event := range events {
-		func(ev Event) {
+		func(ev inbox.Event) {
 			defer func() {
 				if r := recover(); r != nil {
 					w.log.Errorf("panic while handling inbox event id=%s type=%s: %v", ev.ID, ev.Type, r)
@@ -208,7 +209,8 @@ func (w *Worker) processBatch(ctx context.Context, key string, events []Event) e
 		if err := w.store.BlockInboxKeyUntil(ctx, key, next); err != nil {
 			return err
 		}
-		if _, err := w.store.MarkInboxEventsAsPending(ctx, next, pending...); err != nil {
+
+		if _, err := w.store.MarkInboxEventsAsPending(ctx, next, pending[0]); err != nil {
 			return err
 		}
 	} else {

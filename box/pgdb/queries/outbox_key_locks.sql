@@ -19,11 +19,10 @@ SET owner     = EXCLUDED.owner,
 WHERE outbox_key_locks.stale_at <= (now() AT TIME ZONE 'UTC')
 RETURNING key, owner, locked_at, stale_at;
 
-
--- name: UnlockOutboxKey :exec
+-- name: DeleteOutboxKey :exec
 DELETE FROM outbox_key_locks
-WHERE key = sqlc.arg(key)::text
-    AND owner = sqlc.arg(owner)::text;
+WHERE "key" = sqlc.arg(key)::text
+  AND owner = sqlc.arg(owner)::text;
 
 -- name: DeleteStaleOutboxKeyLocks :exec
 DELETE FROM outbox_key_locks

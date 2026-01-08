@@ -10,6 +10,22 @@ import (
 	"time"
 )
 
+const deleteOutboxKey = `-- name: DeleteOutboxKey :exec
+DELETE FROM outbox_key_locks
+WHERE "key" = $1::text
+  AND owner = $2::text
+`
+
+type DeleteOutboxKeyParams struct {
+	Key   string
+	Owner string
+}
+
+func (q *Queries) DeleteOutboxKey(ctx context.Context, arg DeleteOutboxKeyParams) error {
+	_, err := q.db.ExecContext(ctx, deleteOutboxKey, arg.Key, arg.Owner)
+	return err
+}
+
 const deleteStaleOutboxKeyLocks = `-- name: DeleteStaleOutboxKeyLocks :exec
 DELETE FROM outbox_key_locks
 WHERE stale_at <= (now() AT TIME ZONE 'UTC')
@@ -58,20 +74,4 @@ func (q *Queries) TryLockOutboxKey(ctx context.Context, arg TryLockOutboxKeyPara
 		&i.StaleAt,
 	)
 	return i, err
-}
-
-const unlockOutboxKey = `-- name: UnlockOutboxKey :exec
-DELETE FROM outbox_key_locks
-WHERE key = $1::text
-    AND owner = $2::text
-`
-
-type UnlockOutboxKeyParams struct {
-	Key   string
-	Owner string
-}
-
-func (q *Queries) UnlockOutboxKey(ctx context.Context, arg UnlockOutboxKeyParams) error {
-	_, err := q.db.ExecContext(ctx, unlockOutboxKey, arg.Key, arg.Owner)
-	return err
 }

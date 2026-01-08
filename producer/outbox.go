@@ -1,35 +1,37 @@
-package outbox
+package producer
 
 import (
 	"context"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/netbill/evebox/box/outbox"
 	"github.com/netbill/logium"
 	"github.com/segmentio/kafka-go"
 )
 
-type Worker struct {
+type OutboxWorker struct {
 	log    logium.Logger
 	addr   []string
-	outbox Box
-	cfg    WorkerConfig
+	outbox outbox.Box
+	cfg    OutboxWorkerConfig
 }
 
-type WorkerConfig struct {
+type OutboxWorkerConfig struct {
 	Name string
 
+	// BetchLimit defines maximum number of events to process in one batch
 	BatchLimit int32
 
+	// LockTTL defines how much time wee need for processing one outbox key
 	LockTTL time.Duration
 
-	LeaseTTL time.Duration
-
-	KeyBlockDelay time.Duration
-
+	// EventRetryDelay How long time wee want to do not work eith this key after failure
 	EventRetryDelay time.Duration
 
+	// MinSleep defines minimum sleep time between ticks when no work is done
 	MinSleep time.Duration
+	// MaxSleep defines maximum sleep time between ticks when no work is done
 	MaxSleep time.Duration
 
 	RequiredAcks kafka.RequiredAcks
@@ -38,18 +40,12 @@ type WorkerConfig struct {
 	Balancer     kafka.Balancer
 }
 
-func NewWorker(log logium.Logger, ob Box, addr []string, cfg WorkerConfig) *Worker {
+func NewOutboxWorker(log logium.Logger, ob outbox.Box, addr []string, cfg OutboxWorkerConfig) *OutboxWorker {
 	if cfg.BatchLimit <= 0 {
 		cfg.BatchLimit = 100
 	}
 	if cfg.LockTTL <= 0 {
 		cfg.LockTTL = 1 * time.Minute
-	}
-	if cfg.LeaseTTL <= 0 {
-		cfg.LeaseTTL = 30 * time.Second
-	}
-	if cfg.KeyBlockDelay <= 0 {
-		cfg.KeyBlockDelay = 10 * time.Second
 	}
 	if cfg.EventRetryDelay <= 0 {
 		cfg.EventRetryDelay = 1 * time.Minute
@@ -74,7 +70,7 @@ func NewWorker(log logium.Logger, ob Box, addr []string, cfg WorkerConfig) *Work
 		cfg.Balancer = &kafka.LeastBytes{}
 	}
 
-	return &Worker{
+	return &OutboxWorker{
 		log:    log,
 		addr:   addr,
 		outbox: ob,
@@ -82,7 +78,7 @@ func NewWorker(log logium.Logger, ob Box, addr []string, cfg WorkerConfig) *Work
 	}
 }
 
-func (w *Worker) Run(ctx context.Context) {
+func (w *OutboxWorker) Run(ctx context.Context) {
 	writer := &kafka.Writer{
 		Addr:         kafka.TCP(w.addr...),
 		Balancer:     w.cfg.Balancer,
@@ -127,7 +123,7 @@ func (w *Worker) Run(ctx context.Context) {
 	}
 }
 
-func (w *Worker) tick(ctx context.Context, writer *kafka.Writer) bool {
+func (w *OutboxWorker) tick(ctx context.Context, writer *kafka.Writer) bool {
 	key, err := w.outbox.GetPendingOutboxKey(ctx)
 	if err != nil {
 		w.log.Errorf("outbox.GetPendingOutboxKey: %v", err)
@@ -147,18 +143,16 @@ func (w *Worker) tick(ctx context.Context, writer *kafka.Writer) bool {
 	}
 
 	defer func() {
-		if deferr := w.outbox.UnlockOutboxKey(ctx, key, w.cfg.Name); deferr != nil {
+		if deferr := w.outbox.DeleteOutboxKey(ctx, key, w.cfg.Name); deferr != nil {
 			w.log.Errorf("outbox.UnlockOutboxKey(key=%s): %v", key, deferr)
 		}
 	}()
 
-	leaseUntil := time.Now().UTC().Add(w.cfg.LeaseTTL)
-
-	var events []Event
+	var events []outbox.Event
 
 	if err = w.outbox.Transaction(ctx, func(txCtx context.Context) error {
 		var txErr error
-		events, txErr = w.outbox.ClaimPendingOutboxEvents(txCtx, key, w.cfg.BatchLimit, leaseUntil)
+		events, txErr = w.outbox.GetPendingOutboxEvents(txCtx, key, w.cfg.BatchLimit)
 		return txErr
 	}); err != nil {
 		w.log.Errorf("outbox.ClaimPendingOutboxEvents(key=%s): %v", key, err)
@@ -192,11 +186,11 @@ func (w *Worker) tick(ctx context.Context, writer *kafka.Writer) bool {
 		if len(pending) > 0 {
 			nextRetryAt := time.Now().UTC().Add(w.cfg.EventRetryDelay)
 
-			if _, txErr = w.outbox.MarkOutboxEventsAsPending(txCtx, nextRetryAt, pending...); txErr != nil {
+			if _, txErr = w.outbox.MarkOutboxEventAsPending(txCtx, nextRetryAt, pending[0]); txErr != nil {
 				return txErr
 			}
 
-			if txErr = w.outbox.BlockOutboxKeyUntil(txCtx, key, time.Now().UTC().Add(w.cfg.KeyBlockDelay)); txErr != nil {
+			if txErr = w.outbox.BlockOutboxKeyUntil(txCtx, key, nextRetryAt); txErr != nil {
 				return txErr
 			}
 		} else {

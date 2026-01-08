@@ -161,6 +161,46 @@ func (q *Queries) GetPendingInboxEventsByKey(ctx context.Context, arg GetPending
 	return items, nil
 }
 
+const markInboxEventAsPending = `-- name: MarkInboxEventAsPending :one
+UPDATE inbox_events
+SET
+    status = 'pending',
+    attempts = attempts + 1,
+    last_attempt_at = (now() AT TIME ZONE 'UTC'),
+    next_retry_at = $2::timestamptz
+WHERE id = $1
+RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, kafka_partition, kafka_offset, next_retry_at, processed_at
+`
+
+type MarkInboxEventAsPendingParams struct {
+	ID          uuid.UUID
+	NextRetryAt time.Time
+}
+
+func (q *Queries) MarkInboxEventAsPending(ctx context.Context, arg MarkInboxEventAsPendingParams) (InboxEvent, error) {
+	row := q.db.QueryRowContext(ctx, markInboxEventAsPending, arg.ID, arg.NextRetryAt)
+	var i InboxEvent
+	err := row.Scan(
+		&i.ID,
+		&i.Seq,
+		&i.Topic,
+		&i.Key,
+		&i.Type,
+		&i.Version,
+		&i.Producer,
+		&i.Payload,
+		&i.Status,
+		&i.Attempts,
+		&i.LastAttemptAt,
+		&i.CreatedAt,
+		&i.KafkaPartition,
+		&i.KafkaOffset,
+		&i.NextRetryAt,
+		&i.ProcessedAt,
+	)
+	return i, err
+}
+
 const markInboxEventsAsFailed = `-- name: MarkInboxEventsAsFailed :many
 UPDATE inbox_events
 SET
@@ -168,7 +208,7 @@ SET
     attempts = attempts + 1,
     last_attempt_at = (now() AT TIME ZONE 'UTC')
 WHERE id = ANY($1::uuid[])
-    RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, kafka_partition, kafka_offset, next_retry_at, processed_at
+RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, kafka_partition, kafka_offset, next_retry_at, processed_at
 `
 
 func (q *Queries) MarkInboxEventsAsFailed(ctx context.Context, ids []uuid.UUID) ([]InboxEvent, error) {
@@ -211,69 +251,15 @@ func (q *Queries) MarkInboxEventsAsFailed(ctx context.Context, ids []uuid.UUID) 
 	return items, nil
 }
 
-const markInboxEventsAsPending = `-- name: MarkInboxEventsAsPending :many
-UPDATE inbox_events
-SET
-    status = 'pending',
-    attempts = attempts + 1,
-    last_attempt_at = (now() AT TIME ZONE 'UTC'),
-    next_retry_at = $1::timestamptz
-WHERE id = ANY($2::uuid[])
-    RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, kafka_partition, kafka_offset, next_retry_at, processed_at
-`
-
-type MarkInboxEventsAsPendingParams struct {
-	NextRetryAt time.Time
-	Ids         []uuid.UUID
-}
-
-func (q *Queries) MarkInboxEventsAsPending(ctx context.Context, arg MarkInboxEventsAsPendingParams) ([]InboxEvent, error) {
-	rows, err := q.db.QueryContext(ctx, markInboxEventsAsPending, arg.NextRetryAt, pq.Array(arg.Ids))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []InboxEvent
-	for rows.Next() {
-		var i InboxEvent
-		if err := rows.Scan(
-			&i.ID,
-			&i.Seq,
-			&i.Topic,
-			&i.Key,
-			&i.Type,
-			&i.Version,
-			&i.Producer,
-			&i.Payload,
-			&i.Status,
-			&i.Attempts,
-			&i.LastAttemptAt,
-			&i.CreatedAt,
-			&i.KafkaPartition,
-			&i.KafkaOffset,
-			&i.NextRetryAt,
-			&i.ProcessedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const markInboxEventsAsProcessed = `-- name: MarkInboxEventsAsProcessed :many
 UPDATE inbox_events
 SET
     status = 'processed',
+    attempts = attempts + 1,
+    last_attempt_at = (now() AT TIME ZONE 'UTC'),
     processed_at = (now() AT TIME ZONE 'UTC')
 WHERE id = ANY($1::uuid[])
-    RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, kafka_partition, kafka_offset, next_retry_at, processed_at
+RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, kafka_partition, kafka_offset, next_retry_at, processed_at
 `
 
 func (q *Queries) MarkInboxEventsAsProcessed(ctx context.Context, ids []uuid.UUID) ([]InboxEvent, error) {

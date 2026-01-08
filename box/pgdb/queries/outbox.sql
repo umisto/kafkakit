@@ -23,29 +23,22 @@ WHERE e.status = 'pending'
 ORDER BY e.seq ASC
 LIMIT 1;
 
--- name: ClaimPendingOutboxEventsByKey :many
-WITH picked AS (
-    SELECT id
-    FROM outbox_events
-    WHERE status = 'pending'
-        AND key = sqlc.arg(key)::text
-        AND next_retry_at <= (now() AT TIME ZONE 'UTC')
-    ORDER BY seq ASC
-    LIMIT $1
-    FOR UPDATE SKIP LOCKED
-)
-UPDATE outbox_events e
-SET
-    attempts = e.attempts + 1,
-    last_attempt_at = (now() AT TIME ZONE 'UTC'),
-    next_retry_at = sqlc.arg(lease_until)::timestamptz
-WHERE e.id IN (SELECT id FROM picked)
-RETURNING e.*;
+-- name: GetPendingOutboxEventsByKey :many
+SELECT *
+FROM outbox_events
+WHERE status = 'pending'
+  AND key = $1
+  AND next_retry_at <= (now() AT TIME ZONE 'UTC')
+ORDER BY seq ASC
+LIMIT $2
+FOR UPDATE SKIP LOCKED;
 
 -- name: MarkOutboxEventsAsSent :many
 UPDATE outbox_events
 SET
     status = 'sent',
+    attempts = attempts + 1,
+    last_attempt_at = (now() AT TIME ZONE 'UTC'),
     sent_at = (now() AT TIME ZONE 'UTC')
 WHERE id = ANY(sqlc.arg(ids)::uuid[])
 RETURNING *;
@@ -53,14 +46,18 @@ RETURNING *;
 -- name: MarkOutboxEventsAsFailed :many
 UPDATE outbox_events
 SET
-    status = 'failed'
+    status = 'failed',
+    attempts = attempts + 1,
+    last_attempt_at = (now() AT TIME ZONE 'UTC')
 WHERE id = ANY(sqlc.arg(ids)::uuid[])
 RETURNING *;
 
--- name: MarkOutboxEventsAsPending :many
+-- name: MarkOutboxEventAsPending :one
 UPDATE outbox_events
 SET
     status = 'pending',
+    attempts = attempts + 1,
+    last_attempt_at = (now() AT TIME ZONE 'UTC'),
     next_retry_at = sqlc.arg(next_retry_at)::timestamptz
-WHERE id = ANY(sqlc.arg(ids)::uuid[])
-    RETURNING *;
+WHERE id = $1
+RETURNING *;

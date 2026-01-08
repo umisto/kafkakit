@@ -171,24 +171,15 @@ func (b Box) MarkInboxEventsAsFailed(
 func (b Box) MarkInboxEventsAsPending(
 	ctx context.Context,
 	nextRetryAt time.Time,
-	ids ...uuid.UUID,
-) ([]Event, error) {
-	if len(ids) == 0 {
-		return nil, nil
-	}
-
-	rows, err := b.queries(ctx).MarkInboxEventsAsPending(ctx, pgdb.MarkInboxEventsAsPendingParams{
-		Ids:         ids,
+	ID uuid.UUID,
+) (Event, error) {
+	row, err := b.queries(ctx).MarkInboxEventAsPending(ctx, pgdb.MarkInboxEventAsPendingParams{
+		ID:          ID,
 		NextRetryAt: nextRetryAt,
 	})
 	if err != nil {
-		return nil, err
+		return Event{}, err
 	}
 
-	events := make([]Event, 0, len(rows))
-	for _, row := range rows {
-		events = append(events, convertInboxEvent(row))
-	}
-
-	return events, nil
+	return convertInboxEvent(row), nil
 }

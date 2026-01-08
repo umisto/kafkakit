@@ -82,16 +82,14 @@ func (b Box) GetPendingOutboxKey(
 	return key, nil
 }
 
-func (b Box) ClaimPendingOutboxEvents(
+func (b Box) GetPendingOutboxEvents(
 	ctx context.Context,
 	key string,
 	limit int32,
-	laseUntil time.Time,
 ) ([]Event, error) {
-	events, err := b.queries(ctx).ClaimPendingOutboxEventsByKey(ctx, pgdb.ClaimPendingOutboxEventsByKeyParams{
-		Key:        key,
-		Limit:      limit,
-		LeaseUntil: laseUntil,
+	events, err := b.queries(ctx).GetPendingOutboxEventsByKey(ctx, pgdb.GetPendingOutboxEventsByKeyParams{
+		Key:   key,
+		Limit: limit,
 	})
 	if err != nil {
 		return nil, err
@@ -145,31 +143,6 @@ func (b Box) MarkOutboxEventsAsSent(
 	return events, nil
 }
 
-func (b Box) MarkOutboxEventsAsPending(
-	ctx context.Context,
-	nextRetryAt time.Time,
-	ids ...uuid.UUID,
-) ([]Event, error) {
-	if len(ids) == 0 {
-		return nil, nil
-	}
-
-	rows, err := b.queries(ctx).MarkOutboxEventsAsPending(ctx, pgdb.MarkOutboxEventsAsPendingParams{
-		Ids:         ids,
-		NextRetryAt: nextRetryAt,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	events := make([]Event, 0, len(rows))
-	for _, row := range rows {
-		events = append(events, convertOutboxEvent(row))
-	}
-
-	return events, nil
-}
-
 func (b Box) MarkOutboxEventsAsFailed(
 	ctx context.Context,
 	ids ...uuid.UUID,
@@ -189,4 +162,20 @@ func (b Box) MarkOutboxEventsAsFailed(
 	}
 
 	return events, nil
+}
+
+func (b Box) MarkOutboxEventAsPending(
+	ctx context.Context,
+	nextRetryAt time.Time,
+	ID uuid.UUID,
+) (Event, error) {
+	row, err := b.queries(ctx).MarkOutboxEventAsPending(ctx, pgdb.MarkOutboxEventAsPendingParams{
+		ID:          ID,
+		NextRetryAt: nextRetryAt,
+	})
+	if err != nil {
+		return Event{}, err
+	}
+
+	return convertOutboxEvent(row), nil
 }

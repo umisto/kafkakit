@@ -42,9 +42,11 @@ FOR UPDATE SKIP LOCKED;
 UPDATE inbox_events
 SET
     status = 'processed',
+    attempts = attempts + 1,
+    last_attempt_at = (now() AT TIME ZONE 'UTC'),
     processed_at = (now() AT TIME ZONE 'UTC')
 WHERE id = ANY(sqlc.arg(ids)::uuid[])
-    RETURNING *;
+RETURNING *;
 
 -- name: MarkInboxEventsAsFailed :many
 UPDATE inbox_events
@@ -53,14 +55,14 @@ SET
     attempts = attempts + 1,
     last_attempt_at = (now() AT TIME ZONE 'UTC')
 WHERE id = ANY(sqlc.arg(ids)::uuid[])
-    RETURNING *;
+RETURNING *;
 
--- name: MarkInboxEventsAsPending :many
+-- name: MarkInboxEventAsPending :one
 UPDATE inbox_events
 SET
     status = 'pending',
     attempts = attempts + 1,
     last_attempt_at = (now() AT TIME ZONE 'UTC'),
     next_retry_at = sqlc.arg(next_retry_at)::timestamptz
-WHERE id = ANY(sqlc.arg(ids)::uuid[])
-    RETURNING *;
+WHERE id = $1
+RETURNING *;

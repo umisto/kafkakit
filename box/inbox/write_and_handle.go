@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/netbill/evebox/box/pgdb"
 	"github.com/segmentio/kafka-go"
 )
@@ -22,11 +21,11 @@ func (b Box) WriteAndHandle(
 ) error {
 	return b.Transaction(ctx, func(ctx context.Context) error {
 		event, err := b.CreateInboxEvent(ctx, message)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
 		if err != nil {
 			return err
-		}
-		if event.ID == uuid.Nil {
-			return nil
 		}
 
 		_, err = b.queries(ctx).TryLockInboxKey(ctx, pgdb.TryLockInboxKeyParams{

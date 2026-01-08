@@ -14,70 +14,6 @@ import (
 	"github.com/lib/pq"
 )
 
-const claimPendingOutboxEventsByKey = `-- name: ClaimPendingOutboxEventsByKey :many
-WITH picked AS (
-    SELECT id
-    FROM outbox_events
-    WHERE status = 'pending'
-        AND key = $3::text
-        AND next_retry_at <= (now() AT TIME ZONE 'UTC')
-    ORDER BY seq ASC
-    LIMIT $1
-    FOR UPDATE SKIP LOCKED
-)
-UPDATE outbox_events e
-SET
-    attempts = e.attempts + 1,
-    last_attempt_at = (now() AT TIME ZONE 'UTC'),
-    next_retry_at = $2::timestamptz
-WHERE e.id IN (SELECT id FROM picked)
-RETURNING e.id, e.seq, e.topic, e.key, e.type, e.version, e.producer, e.payload, e.status, e.attempts, e.last_attempt_at, e.created_at, e.next_retry_at, e.sent_at
-`
-
-type ClaimPendingOutboxEventsByKeyParams struct {
-	Limit      int32
-	LeaseUntil time.Time
-	Key        string
-}
-
-func (q *Queries) ClaimPendingOutboxEventsByKey(ctx context.Context, arg ClaimPendingOutboxEventsByKeyParams) ([]OutboxEvent, error) {
-	rows, err := q.db.QueryContext(ctx, claimPendingOutboxEventsByKey, arg.Limit, arg.LeaseUntil, arg.Key)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OutboxEvent
-	for rows.Next() {
-		var i OutboxEvent
-		if err := rows.Scan(
-			&i.ID,
-			&i.Seq,
-			&i.Topic,
-			&i.Key,
-			&i.Type,
-			&i.Version,
-			&i.Producer,
-			&i.Payload,
-			&i.Status,
-			&i.Attempts,
-			&i.LastAttemptAt,
-			&i.CreatedAt,
-			&i.NextRetryAt,
-			&i.SentAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const createOutboxEvent = `-- name: CreateOutboxEvent :one
 INSERT INTO outbox_events (
     id, topic, key, type, version, producer, payload
@@ -155,10 +91,104 @@ func (q *Queries) GetOutboxEventByID(ctx context.Context, id uuid.UUID) (OutboxE
 	return i, err
 }
 
+const getPendingOutboxEventsByKey = `-- name: GetPendingOutboxEventsByKey :many
+SELECT id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, next_retry_at, sent_at
+FROM outbox_events
+WHERE status = 'pending'
+  AND key = $1
+  AND next_retry_at <= (now() AT TIME ZONE 'UTC')
+ORDER BY seq ASC
+LIMIT $2
+FOR UPDATE SKIP LOCKED
+`
+
+type GetPendingOutboxEventsByKeyParams struct {
+	Key   string
+	Limit int32
+}
+
+func (q *Queries) GetPendingOutboxEventsByKey(ctx context.Context, arg GetPendingOutboxEventsByKeyParams) ([]OutboxEvent, error) {
+	rows, err := q.db.QueryContext(ctx, getPendingOutboxEventsByKey, arg.Key, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OutboxEvent
+	for rows.Next() {
+		var i OutboxEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.Seq,
+			&i.Topic,
+			&i.Key,
+			&i.Type,
+			&i.Version,
+			&i.Producer,
+			&i.Payload,
+			&i.Status,
+			&i.Attempts,
+			&i.LastAttemptAt,
+			&i.CreatedAt,
+			&i.NextRetryAt,
+			&i.SentAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markOutboxEventAsPending = `-- name: MarkOutboxEventAsPending :one
+UPDATE outbox_events
+SET
+    status = 'pending',
+    attempts = attempts + 1,
+    last_attempt_at = (now() AT TIME ZONE 'UTC'),
+    next_retry_at = $2::timestamptz
+WHERE id = $1
+RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, next_retry_at, sent_at
+`
+
+type MarkOutboxEventAsPendingParams struct {
+	ID          uuid.UUID
+	NextRetryAt time.Time
+}
+
+func (q *Queries) MarkOutboxEventAsPending(ctx context.Context, arg MarkOutboxEventAsPendingParams) (OutboxEvent, error) {
+	row := q.db.QueryRowContext(ctx, markOutboxEventAsPending, arg.ID, arg.NextRetryAt)
+	var i OutboxEvent
+	err := row.Scan(
+		&i.ID,
+		&i.Seq,
+		&i.Topic,
+		&i.Key,
+		&i.Type,
+		&i.Version,
+		&i.Producer,
+		&i.Payload,
+		&i.Status,
+		&i.Attempts,
+		&i.LastAttemptAt,
+		&i.CreatedAt,
+		&i.NextRetryAt,
+		&i.SentAt,
+	)
+	return i, err
+}
+
 const markOutboxEventsAsFailed = `-- name: MarkOutboxEventsAsFailed :many
 UPDATE outbox_events
 SET
-    status = 'failed'
+    status = 'failed',
+    attempts = attempts + 1,
+    last_attempt_at = (now() AT TIME ZONE 'UTC')
 WHERE id = ANY($1::uuid[])
 RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, next_retry_at, sent_at
 `
@@ -201,62 +231,12 @@ func (q *Queries) MarkOutboxEventsAsFailed(ctx context.Context, ids []uuid.UUID)
 	return items, nil
 }
 
-const markOutboxEventsAsPending = `-- name: MarkOutboxEventsAsPending :many
-UPDATE outbox_events
-SET
-    status = 'pending',
-    next_retry_at = $1::timestamptz
-WHERE id = ANY($2::uuid[])
-    RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, next_retry_at, sent_at
-`
-
-type MarkOutboxEventsAsPendingParams struct {
-	NextRetryAt time.Time
-	Ids         []uuid.UUID
-}
-
-func (q *Queries) MarkOutboxEventsAsPending(ctx context.Context, arg MarkOutboxEventsAsPendingParams) ([]OutboxEvent, error) {
-	rows, err := q.db.QueryContext(ctx, markOutboxEventsAsPending, arg.NextRetryAt, pq.Array(arg.Ids))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OutboxEvent
-	for rows.Next() {
-		var i OutboxEvent
-		if err := rows.Scan(
-			&i.ID,
-			&i.Seq,
-			&i.Topic,
-			&i.Key,
-			&i.Type,
-			&i.Version,
-			&i.Producer,
-			&i.Payload,
-			&i.Status,
-			&i.Attempts,
-			&i.LastAttemptAt,
-			&i.CreatedAt,
-			&i.NextRetryAt,
-			&i.SentAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const markOutboxEventsAsSent = `-- name: MarkOutboxEventsAsSent :many
 UPDATE outbox_events
 SET
     status = 'sent',
+    attempts = attempts + 1,
+    last_attempt_at = (now() AT TIME ZONE 'UTC'),
     sent_at = (now() AT TIME ZONE 'UTC')
 WHERE id = ANY($1::uuid[])
 RETURNING id, seq, topic, key, type, version, producer, payload, status, attempts, last_attempt_at, created_at, next_retry_at, sent_at

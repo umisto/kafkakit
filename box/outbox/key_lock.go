@@ -29,12 +29,12 @@ func (b Box) LockOutboxKey(
 	return true, nil
 }
 
-func (b Box) UnlockOutboxKey(
+func (b Box) DeleteOutboxKey(
 	ctx context.Context,
 	key string,
 	owner string,
 ) error {
-	return b.queries(ctx).UnlockOutboxKey(ctx, pgdb.UnlockOutboxKeyParams{
+	return b.queries(ctx).DeleteOutboxKey(ctx, pgdb.DeleteOutboxKeyParams{
 		Key:   key,
 		Owner: owner,
 	})
