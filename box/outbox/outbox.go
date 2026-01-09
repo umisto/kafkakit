@@ -1,23 +1,22 @@
-package producer
+package outbox
 
 import (
 	"context"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/netbill/evebox/box/outbox"
 	"github.com/netbill/logium"
 	"github.com/segmentio/kafka-go"
 )
 
-type OutboxWorker struct {
+type Worker struct {
 	log    logium.Logger
 	addr   []string
-	outbox outbox.Box
-	cfg    OutboxWorkerConfig
+	outbox Box
+	cfg    WorkerConfig
 }
 
-type OutboxWorkerConfig struct {
+type WorkerConfig struct {
 	Name string
 
 	// BetchLimit defines maximum number of events to process in one batch
@@ -40,7 +39,7 @@ type OutboxWorkerConfig struct {
 	Balancer     kafka.Balancer
 }
 
-func NewOutboxWorker(log logium.Logger, ob outbox.Box, addr []string, cfg OutboxWorkerConfig) *OutboxWorker {
+func NewWorker(log logium.Logger, ob Box, addr []string, cfg WorkerConfig) *Worker {
 	if cfg.BatchLimit <= 0 {
 		cfg.BatchLimit = 100
 	}
@@ -70,7 +69,7 @@ func NewOutboxWorker(log logium.Logger, ob outbox.Box, addr []string, cfg Outbox
 		cfg.Balancer = &kafka.LeastBytes{}
 	}
 
-	return &OutboxWorker{
+	return &Worker{
 		log:    log,
 		addr:   addr,
 		outbox: ob,
@@ -78,7 +77,7 @@ func NewOutboxWorker(log logium.Logger, ob outbox.Box, addr []string, cfg Outbox
 	}
 }
 
-func (w *OutboxWorker) Run(ctx context.Context) {
+func (w *Worker) Run(ctx context.Context) {
 	writer := &kafka.Writer{
 		Addr:         kafka.TCP(w.addr...),
 		Balancer:     w.cfg.Balancer,
@@ -123,7 +122,7 @@ func (w *OutboxWorker) Run(ctx context.Context) {
 	}
 }
 
-func (w *OutboxWorker) tick(ctx context.Context, writer *kafka.Writer) bool {
+func (w *Worker) tick(ctx context.Context, writer *kafka.Writer) bool {
 	key, err := w.outbox.GetPendingOutboxKey(ctx)
 	if err != nil {
 		w.log.Errorf("outbox.GetPendingOutboxKey: %v", err)
@@ -148,7 +147,7 @@ func (w *OutboxWorker) tick(ctx context.Context, writer *kafka.Writer) bool {
 		}
 	}()
 
-	var events []outbox.Event
+	var events []Event
 
 	if err = w.outbox.Transaction(ctx, func(txCtx context.Context) error {
 		var txErr error

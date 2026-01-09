@@ -1,22 +1,21 @@
-package consumer
+package inbox
 
 import (
 	"context"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/netbill/evebox/box/inbox"
 	"github.com/netbill/logium"
 )
 
-type InboxWorker struct {
+type Worker struct {
 	log      logium.Logger
-	store    inbox.Box
-	cfg      InboxConfigWorker
-	handlers map[string]inbox.Handler
+	store    Box
+	cfg      ConfigWorker
+	handlers map[string]Handler
 }
 
-type InboxConfigWorker struct {
+type ConfigWorker struct {
 	Name string
 
 	//BatchSize is the maximum number of events to process in one batch.
@@ -31,10 +30,10 @@ type InboxConfigWorker struct {
 	MaxSleep time.Duration
 
 	//Unknown is the function to call when an unknown event type is encountered.
-	Unknown func(ctx context.Context, ev inbox.Event) inbox.EventStatus
+	Unknown func(ctx context.Context, ev Event) EventStatus
 }
 
-func NewInboxWorker(log logium.Logger, store inbox.Box, cfg InboxConfigWorker) *InboxWorker {
+func NewWorker(log logium.Logger, store Box, cfg ConfigWorker) *Worker {
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = 50
 	}
@@ -48,24 +47,24 @@ func NewInboxWorker(log logium.Logger, store inbox.Box, cfg InboxConfigWorker) *
 		cfg.MaxSleep = 2 * time.Second
 	}
 	if cfg.Unknown == nil {
-		cfg.Unknown = func(ctx context.Context, ev inbox.Event) inbox.EventStatus {
-			return inbox.EventStatusFailed
+		cfg.Unknown = func(ctx context.Context, ev Event) EventStatus {
+			return EventStatusFailed
 		}
 	}
 
-	return &InboxWorker{
+	return &Worker{
 		log:      log,
 		store:    store,
 		cfg:      cfg,
-		handlers: map[string]inbox.Handler{},
+		handlers: map[string]Handler{},
 	}
 }
 
-func (w *InboxWorker) Handle(eventType string, h inbox.Handler) {
+func (w *Worker) Handle(eventType string, h Handler) {
 	w.handlers[eventType] = h
 }
 
-func (w *InboxWorker) Run(ctx context.Context) {
+func (w *Worker) Run(ctx context.Context) {
 	sleep := time.Duration(0)
 
 	for {
@@ -101,7 +100,7 @@ func (w *InboxWorker) Run(ctx context.Context) {
 	}
 }
 
-func (w *InboxWorker) tick(ctx context.Context) bool {
+func (w *Worker) tick(ctx context.Context) bool {
 	worked := false
 
 	err := w.store.Transaction(ctx, func(txCtx context.Context) error {
@@ -145,18 +144,18 @@ func (w *InboxWorker) tick(ctx context.Context) bool {
 	return worked
 }
 
-func (w *InboxWorker) processBatch(ctx context.Context, key string, events []inbox.Event) error {
+func (w *Worker) processBatch(ctx context.Context, key string, events []Event) error {
 	processed := make([]uuid.UUID, 0, len(events))
 	pending := make([]uuid.UUID, 0, 1)
 	failed := make([]uuid.UUID, 0, len(events))
 
-	distribute := func(id uuid.UUID, status inbox.EventStatus) {
+	distribute := func(id uuid.UUID, status EventStatus) {
 		switch status {
-		case inbox.EventStatusProcessed:
+		case EventStatusProcessed:
 			processed = append(processed, id)
-		case inbox.EventStatusPending:
+		case EventStatusPending:
 			pending = append(pending, id)
-		case inbox.EventStatusFailed:
+		case EventStatusFailed:
 			failed = append(failed, id)
 		default:
 			failed = append(failed, id)
@@ -164,7 +163,7 @@ func (w *InboxWorker) processBatch(ctx context.Context, key string, events []inb
 	}
 
 	for _, event := range events {
-		func(ev inbox.Event) {
+		func(ev Event) {
 			defer func() {
 				if r := recover(); r != nil {
 					w.log.Errorf("panic while handling inbox event id=%s type=%s: %v", ev.ID, ev.Type, r)
